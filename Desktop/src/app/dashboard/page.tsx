@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [newsItems, setNewsItems] = useState<NewsArticle[]>([])
   const [suggestedUsers, setSuggested] = useState<any[]>([])
   const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
+  const [followedProfiles, setFollowedProfiles] = useState<any[]>([]) // NEW: profiles of allies
   const [loading, setLoading] = useState(true)
   const [newsLoading, setNewsLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
@@ -88,17 +89,32 @@ export default function DashboardPage() {
         if (!au) { router.push('/auth/login'); return }
         setUser(au)
 
+        // Load own profile
         const { data: myProfile } = await supabase.from('profiles').select('*').eq('id', au.id).single()
         if (myProfile) setCurrentUserProfile(myProfile)
 
+        // Load following (allies) IDs
         const { data: alliesData } = await supabase.from('allies').select('following_id').eq('follower_id', au.id)
         const followSet = new Set<string>((alliesData || []).map((a: any) => a.following_id))
         setFollowing(followSet)
 
+        // ---- NEW: Fetch profiles of followed users (allies) ----
+        const followingIds = Array.from(followSet)
+        if (followingIds.length > 0) {
+          const { data: fp } = await supabase
+            .from('profiles')
+            .select('id, display_name, username, avatar_url')
+            .in('id', followingIds)
+          setFollowedProfiles(fp || [])
+        } else {
+          setFollowedProfiles([])
+        }
+
+        // Load forges (published)
         const sel = `id,name,description,template_type,user_id,created_at,is_published,profiles:user_id(id,display_name,username,avatar_url)`
         const { data: forges } = await supabase.from('forges').select(sel).eq('is_published', true).order('created_at', { ascending: false }).limit(30)
-        
         setFeedItems(forges || [])
+
         if (forges?.length) {
           const { data: fc } = await supabase.from('forge_comments').select('forge_id').in('forge_id', forges.map(f => f.id))
           const cc: Record<string, number> = {}
@@ -106,9 +122,11 @@ export default function DashboardPage() {
           setForgeCC(cc)
         }
 
+        // Load suggested users (not followed, not current)
         const { data: users } = await supabase.from('profiles').select('id,display_name,username,avatar_url').neq('id', au.id).limit(12)
         setSuggested((users || []).filter((u: any) => !followSet.has(u.id)))
 
+        // Load liked forges
         const { data: liked } = await supabase.from('interactions').select('forge_id').eq('user_id', au.id).eq('interaction_type', 'like')
         setLikedForges(new Set((liked || []).map((i: any) => i.forge_id)))
 
@@ -157,8 +175,31 @@ export default function DashboardPage() {
   // ── Derived View Logic ─────────────────────────────────────────────────────
   const visibleNews = showAllNews ? newsItems : newsItems.slice(0, 4)
   const followingForges = feedItems.filter(f => following.has(f.user_id))
-  const usersWithSelf = currentUserProfile ? [currentUserProfile, ...suggestedUsers] : suggestedUsers
 
+  // ---- NEW: Correctly combine users for stories strip ----
+  const usersWithSelf: any[] = []
+  const seen = new Set<string>()
+
+  if (currentUserProfile) {
+    usersWithSelf.push(currentUserProfile)
+    seen.add(currentUserProfile.id)
+  }
+
+  followedProfiles.forEach(p => {
+    if (!seen.has(p.id)) {
+      usersWithSelf.push(p)
+      seen.add(p.id)
+    }
+  })
+
+  suggestedUsers.forEach(u => {
+    if (!seen.has(u.id)) {
+      usersWithSelf.push(u)
+      seen.add(u.id)
+    }
+  })
+
+  // ── Loading Skeleton ─────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="bg-gray-50 min-h-screen p-8">
@@ -177,7 +218,7 @@ export default function DashboardPage() {
       <DashboardHeader activeTab={activeTab} onTabChange={setActiveTab} />
       
       <StoriesStrip
-        users={usersWithSelf}
+        users={usersWithSelf}           
         currentUserId={user?.id || null}
         onOpenStory={setViewingStoryUserId}
       />

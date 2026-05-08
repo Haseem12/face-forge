@@ -35,6 +35,7 @@ export default function StoriesStrip({
   const [caption, setCaption] = useState('')
 
   // Fetch unexpired stories for the given users + current user
+ 
   useEffect(() => {
     const userIds = users.map(u => u.id)
     if (currentUserId) {
@@ -161,7 +162,8 @@ export default function StoriesStrip({
             </div>
 
             {/* User stories */}
-            {users.slice(0, 10).map(u => (
+      
+{users.filter(u => hasStory(u.id)).slice(0, 10).map(u => (
               <button
                 key={u.id}
                 onClick={() => hasStory(u.id) && onOpenStory(u.id)}

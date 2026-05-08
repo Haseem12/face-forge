@@ -1,8 +1,10 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Image from 'next/image'
-import { Heart, MessageCircle, Share2, Check, Flame, ExternalLink } from 'lucide-react'
+import { Heart, MessageCircle, Share2, Check, ExternalLink } from 'lucide-react'
 import { timeAgo } from '@/lib/dashboard/helpers'
+import { getArticleImage } from '@/lib/dashboard/image-helper'
 
 export default function MainNewsCard({
   article,
@@ -21,25 +23,56 @@ export default function MainNewsCard({
   onComment: () => void
   onShare: () => void
 }) {
-  const imageUrl = article.media_url || article.urlToImage
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [imageLoading, setImageLoading] = useState(true)
+
   const title = article.caption || article.title || "Untitled"
   const sourceName = article.source?.name || "Tech Feed"
+  const originalImage = article.media_url || article.urlToImage
+
+  // Load image on mount/when article changes
+  useEffect(() => {
+    const loadImage = async () => {
+      setImageLoading(true)
+      const url = await getArticleImage(title, originalImage)
+      setImageUrl(url)
+      setImageLoading(false)
+    }
+    loadImage()
+  }, [title, originalImage])
 
   return (
     <article className="bg-white rounded-3xl border border-gray-100 overflow-hidden transition-all duration-150 shadow-sm active:scale-[0.99] w-full">
       {/* Top Section: Large Image */}
       <div className="relative w-full h-48 xs:h-52 sm:h-64 bg-gray-50">
-        {imageUrl ? (
-          <Image
-            src={imageUrl}
-            alt={title}
-            fill
-            className="object-cover"
-            unoptimized
-          />
+        {imageLoading ? (
+          <div className="absolute inset-0 bg-gray-200 animate-pulse" />
+        ) : imageUrl ? (
+          imageUrl.startsWith('data:') ? (
+            // For SVG data URLs, use img tag instead of Next Image
+            <img
+              src={imageUrl}
+              alt={title}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            // For regular URLs, use Next Image for optimization
+            <Image
+              src={imageUrl}
+              alt={title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 90vw, 80vw"
+              priority
+              unoptimized
+            />
+          )
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-            <Flame className="h-8 w-8 text-orange-200" />
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">
+            <div className="text-center">
+              <div className="text-4xl mb-2">📰</div>
+              <p className="text-gray-500 text-sm">News image</p>
+            </div>
           </div>
         )}
         
@@ -104,6 +137,7 @@ export default function MainNewsCard({
     </article>
   )
 }
+
 // ─── Trending Section Wrapper ────────────────────────────────────────────────
 
 export function TrendingNewsSection({
@@ -137,7 +171,7 @@ export function TrendingNewsSection({
 
       <div className="space-y-2.5">
         {visible.map((article: any) => (
-          <NewsCard
+          <MainNewsCard
             key={article.id}
             article={article}
             isLiked={likedNews.has(article.id)}

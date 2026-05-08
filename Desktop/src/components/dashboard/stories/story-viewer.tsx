@@ -3,16 +3,22 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
+import Image from 'next/image'
 
 interface Story {
   id: string
   media_url: string
   caption?: string | null
   created_at: string
+  profiles?: {
+    display_name: string
+    avatar_url: string
+    username: string
+  }
 }
 
 export default function StoryViewer({
-  userId,
+  userId, // This is the ID of the person whose story we clicked
   onClose,
 }: {
   userId: string
@@ -26,19 +32,27 @@ export default function StoryViewer({
   useEffect(() => {
     if (!userId) return
 
-    supabase
-      .from('stories')
-      .select('id, media_url, caption, created_at')
-      .eq('user_id', userId)
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: true })
-      .then(({ data, error }) => {
-        if (error) {
-          console.error('Story fetch error:', error)
-        }
-        setStories(data || [])
-        setLoading(false)
-      })
+    const fetchStories = async () => {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('stories')
+        .select(`
+          id, 
+          media_url, 
+          caption, 
+          created_at,
+          profiles:user_id (display_name, avatar_url, username)
+        `)
+        .eq('user_id', userId) // Filters specifically for the person you clicked
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: true })
+
+      if (error) console.error('Story fetch error:', error)
+      setStories(data || [])
+      setLoading(false)
+    }
+
+    fetchStories()
   }, [userId, supabase])
 
   const goNext = useCallback(() => {
@@ -53,114 +67,99 @@ export default function StoryViewer({
     if (currentIndex > 0) setCurrentIndex(currentIndex - 1)
   }
 
-  // Auto-advance after 5 seconds
+  // Timer logic
   useEffect(() => {
-    if (stories.length === 0) return
+    if (stories.length === 0 || loading) return
     const timer = setTimeout(goNext, 5000)
     return () => clearTimeout(timer)
-  }, [currentIndex, stories, goNext])
+  }, [currentIndex, stories, goNext, loading])
 
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-      if (e.key === 'ArrowLeft') goPrev()
-      if (e.key === 'ArrowRight') goNext()
-    }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose, goNext, goPrev])
+  if (loading) return (
+    <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">
+      <div className="animate-spin h-8 w-8 border-4 border-white border-t-orange-500 rounded-full" />
+    </div>
+  )
 
-  if (loading) {
-    return (
-      <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
-        <div className="animate-spin h-8 w-8 border-4 border-white border-t-orange-500 rounded-full" />
-      </div>
-    )
-  }
-
-  if (stories.length === 0) {
-    return (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center text-white">
-        <p className="mb-4">No stories available</p>
-        <button onClick={onClose} className="px-4 py-2 rounded-full bg-white/20">
-          Close
-        </button>
-      </div>
-    )
-  }
+  if (stories.length === 0) return null
 
   const current = stories[currentIndex]
+  const profile = current.profiles
 
   return (
-    <div className="fixed inset-0 z-50 bg-black">
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 z-20 p-1 rounded-full bg-black/50 text-white hover:bg-black/70 transition"
-      >
-        <X className="h-6 w-6" />
-      </button>
-
-      {/* Progress bar */}
-      <div className="absolute top-0 left-4 right-4 flex gap-1 pt-2 z-10">
-        {stories.map((_, idx) => (
-          <div key={idx} className="flex-1 h-1 bg-gray-600 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-white transition-all duration-300"
-              style={{
-                width:
-                  idx < currentIndex
-                    ? '100%'
-                    : idx === currentIndex
-                    ? `${((currentIndex + 1) / stories.length) * 100}%`
-                    : '0%',
-              }}
-            />
+    <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">
+      <div className="relative w-full max-w-md h-full md:h-[90vh] md:rounded-3xl overflow-hidden bg-zinc-900">
+        
+        {/* Header: Profile Info */}
+        <div className="absolute top-6 left-4 right-4 z-20 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full border-2 border-orange-500 overflow-hidden relative">
+              <Image 
+                src={profile?.avatar_url || 'https://github.com/shadcn.png'} 
+                alt="Avatar" 
+                fill 
+                className="object-cover"
+              />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-white text-sm font-bold shadow-black drop-shadow-md">
+                {profile?.display_name || 'User'}
+              </span>
+              <span className="text-white/60 text-[10px]">
+                {new Date(current.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
           </div>
-        ))}
-      </div>
 
-      {/* Navigation arrows */}
-      {currentIndex > 0 && (
-        <button
-          onClick={goPrev}
-          className="absolute left-4 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition"
-        >
-          <ChevronLeft className="h-6 w-6" />
-        </button>
-      )}
-      {currentIndex < stories.length - 1 && (
-        <button
-          onClick={goNext}
-          className="absolute right-4 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition"
-        >
-          <ChevronRight className="h-6 w-6" />
-        </button>
-      )}
+          <button onClick={onClose} className="text-white/80 hover:text-white p-2">
+            <X className="h-6 w-6" />
+          </button>
+        </div>
 
-      {/* Story content */}
-      <div className="w-full h-full flex items-center justify-center" onClick={goNext}>
-        {current.media_url.endsWith('.mp4') || current.media_url.includes('video') ? (
-          <video
-            src={current.media_url}
-            className="max-h-full max-w-full object-contain"
-            autoPlay
-            muted
-            onEnded={goNext}
-            onClick={e => e.stopPropagation()}
-          />
-        ) : (
-          <img
-            src={current.media_url}
-            className="max-h-full max-w-full object-contain"
-            alt="story"
-          />
-        )}
+        {/* Progress Segments */}
+        <div className="absolute top-2 left-2 right-2 flex gap-1 z-20">
+          {stories.map((_, idx) => (
+            <div key={idx} className="flex-1 h-1 bg-white/20 rounded-full overflow-hidden">
+              <div 
+                className={`h-full bg-white transition-all ${idx === currentIndex ? 'duration-[5000ms] linear' : ''}`}
+                style={{ 
+                  width: idx < currentIndex ? '100%' : idx === currentIndex ? '100%' : '0%',
+                  transitionProperty: idx === currentIndex ? 'width' : 'none'
+                }}
+              />
+            </div>
+          ))}
+        </div>
 
-        {/* Caption overlay */}
+        {/* Media Content */}
+        <div className="w-full h-full flex items-center justify-center select-none" onClick={goNext}>
+          {current.media_url.match(/\.(mp4|webm|ogg)$/) ? (
+            <video
+              src={current.media_url}
+              className="w-full h-full object-cover"
+              autoPlay
+              muted
+              playsInline
+              onEnded={goNext}
+            />
+          ) : (
+            <Image
+              src={current.media_url}
+              alt="story"
+              fill
+              className="object-cover"
+              priority
+            />
+          )}
+        </div>
+
+        {/* Navigation Areas (Invisible tap zones) */}
+        <div className="absolute inset-y-0 left-0 w-1/4 z-10" onClick={(e) => { e.stopPropagation(); goPrev(); }} />
+        <div className="absolute inset-y-0 right-0 w-3/4 z-10" onClick={(e) => { e.stopPropagation(); goNext(); }} />
+
+        {/* Caption */}
         {current.caption && (
-          <div className="absolute bottom-8 left-4 right-4 text-center text-white text-sm font-medium bg-black/40 backdrop-blur-sm rounded-xl px-4 py-2">
-            {current.caption}
+          <div className="absolute bottom-10 left-4 right-4 bg-black/40 backdrop-blur-md p-4 rounded-2xl border border-white/10">
+            <p className="text-white text-sm text-center">{current.caption}</p>
           </div>
         )}
       </div>
