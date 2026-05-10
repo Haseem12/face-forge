@@ -8,7 +8,7 @@ import {
   Flame, TrendingUp, Zap, Plus
 } from 'lucide-react'
 import Link from 'next/link'
-
+import ThreeCurveFab from '@/components/dashboard/layout/three-curve-fab'
 import StoryViewer from '@/components/dashboard/stories/story-viewer'
 import type { ForgeFeed, NewsArticle } from '@/lib/dashboard/types'
 import { TRENDING } from '@/lib/dashboard/constants'
@@ -320,13 +320,8 @@ export default function DashboardPage() {
       </main>
 
       {/* FAB: Create Button */}
-      <div className="fixed bottom-6 right-6 sm:hidden z-40">
-        <Link href="/dashboard/forges/create">
-          <button className="h-14 w-14 rounded-full bg-gradient-to-tr from-orange-500 to-purple-600 text-white shadow-2xl flex items-center justify-center active:scale-95 transition">
-            <Plus className="h-6 w-6" />
-          </button>
-        </Link>
-      </div>
+
+        <ThreeCurveFab />
 
       {commentPanel && (
         <CommentPanel

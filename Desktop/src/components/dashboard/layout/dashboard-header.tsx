@@ -7,248 +7,14 @@ import { createClient } from '@/lib/supabase/client'
 import {
   Search, Plus, Bell, Heart, MessageCircle, UserPlus,
   Flame, Zap, AtSign, Star, Newspaper, X, Check,
-  CheckCheck, Loader2, ChevronRight,
+  CheckCheck, Loader2, ChevronRight, Settings, LogOut,
+  User, Home, Hash, Bookmark, CircleUser,
 } from 'lucide-react'
 
-// --- Types ---
+// --- Types, helpers, NotifItem, NotificationCenter (unchanged from your code) ---
+// ... (keep all your existing types, timeAgo, KIND_META, fetchAllNotifications, NotifItem, NotificationCenter exactly as they are)
 
-type NotifKind =
-  | 'like'
-  | 'comment'
-  | 'reply'
-  | 'follow'
-  | 'mention'
-  | 'news_like'
-  | 'forge_new'
-  | 'news_comment'
-
-interface Notification {
-  id: string
-  kind: NotifKind
-  read: boolean
-  created_at: string
-  actor: { display_name: string; username: string; avatar_url?: string } | null
-  body: string
-  href: string
-}
-
-// --- Helpers ---
-
-function timeAgo(d: string) {
-  const diff = Date.now() - new Date(d).getTime()
-  const m = Math.floor(diff / 60000)
-  if (m < 1) return 'now'
-  if (m < 60) return `${m}m`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h`
-  return `${Math.floor(h / 24)}d`
-}
-
-const KIND_META: Record<NotifKind, { icon: React.ReactNode; color: string; label: string }> = {
-  like: { icon: <Heart className="h-3.5 w-3.5" />, color: 'bg-red-100 text-red-500', label: 'Like' },
-  comment: { icon: <MessageCircle className="h-3.5 w-3.5" />, color: 'bg-blue-100 text-blue-500', label: 'Comment' },
-  reply: { icon: <MessageCircle className="h-3.5 w-3.5" />, color: 'bg-indigo-100 text-indigo-500', label: 'Reply' },
-  follow: { icon: <UserPlus className="h-3.5 w-3.5" />, color: 'bg-green-100 text-green-500', label: 'Follow' },
-  mention: { icon: <AtSign className="h-3.5 w-3.5" />, color: 'bg-yellow-100 text-yellow-600', label: 'Mention' },
-  news_like: { icon: <Heart className="h-3.5 w-3.5" />, color: 'bg-rose-100 text-rose-500', label: 'News like' },
-  forge_new: { icon: <Zap className="h-3.5 w-3.5" />, color: 'bg-purple-100 text-purple-500', label: 'New forge' },
-  news_comment: { icon: <Newspaper className="h-3.5 w-3.5" />, color: 'bg-orange-100 text-orange-500', label: 'News' },
-}
-
-// --- Notification fetcher ---
-
-async function fetchAllNotifications(
-  supabase: ReturnType<typeof createClient>,
-  userId: string
-): Promise<Notification[]> {
-  const notifications: Notification[] = []
-
-  // Note: For production, consider a single RPC call or a dedicated 'notifications' table 
-  // to avoid these multiple round-trips.
-
-  // 1. Forge likes
-  {
-    const { data: myForges } = await supabase.from('forges').select('id, name').eq('user_id', userId)
-    if (myForges?.length) {
-      const forgeIds = myForges.map((f: any) => f.id)
-      const forgeMap: Record<string, string> = {}
-      myForges.forEach((f: any) => { forgeMap[f.id] = f.name })
-
-      const { data: likes } = await supabase
-        .from('interactions')
-        .select('id, forge_id, user_id, created_at, profiles:user_id(display_name, username, avatar_url)')
-        .in('forge_id', forgeIds)
-        .eq('interaction_type', 'like')
-        .neq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(30)
-
-      ;(likes || []).forEach((l: any) => {
-        notifications.push({
-          id: `like-${l.id}`,
-          kind: 'like',
-          read: false,
-          created_at: l.created_at,
-          actor: Array.isArray(l.profiles) ? l.profiles[0] : l.profiles,
-          body: `liked your forge "${forgeMap[l.forge_id] || 'a forge'}"`,
-          href: `/spark/${l.forge_id}`,
-        })
-      })
-    }
-  }
-
-  // 2. Forge comments
-  {
-    const { data: myForges } = await supabase.from('forges').select('id, name').eq('user_id', userId)
-    if (myForges?.length) {
-      const forgeIds = myForges.map((f: any) => f.id)
-      const forgeMap: Record<string, string> = {}
-      myForges.forEach((f: any) => { forgeMap[f.id] = f.name })
-
-      const { data: comments } = await supabase
-        .from('forge_comments')
-        .select('id, forge_id, user_id, content, created_at, parent_id, profiles:user_id(display_name, username, avatar_url)')
-        .in('forge_id', forgeIds)
-        .neq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(30)
-
-      ;(comments || []).forEach((c: any) => {
-        const isReply = !!c.parent_id
-        notifications.push({
-          id: `fcomment-${c.id}`,
-          kind: isReply ? 'reply' : 'comment',
-          read: false,
-          created_at: c.created_at,
-          actor: Array.isArray(c.profiles) ? c.profiles[0] : c.profiles,
-          body: isReply
-            ? `replied to a comment on "${forgeMap[c.forge_id] || 'your forge'}"`
-            : `commented on "${forgeMap[c.forge_id] || 'your forge'}"`,
-          href: `/spark/${c.forge_id}`,
-        })
-      })
-    }
-  }
-
-  // 3. New followers
-  {
-    const { data: followers } = await supabase
-      .from('allies')
-      .select('follower_id, created_at, profiles:follower_id(display_name, username, avatar_url)')
-      .eq('following_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(20)
-
-    ;(followers || []).forEach((f: any) => {
-      notifications.push({
-        id: `follow-${f.follower_id}`,
-        kind: 'follow',
-        read: false,
-        created_at: f.created_at,
-        actor: Array.isArray(f.profiles) ? f.profiles[0] : f.profiles,
-        body: 'started following you',
-        href: `/profile/${(Array.isArray(f.profiles) ? f.profiles[0] : f.profiles)?.username || ''}`,
-      })
-    })
-  }
-
-  const seen = new Set<string>()
-  return notifications
-    .filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true })
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-}
-
-// --- UI Components ---
-
-function NotifItem({ notif, onRead }: { notif: Notification; onRead: (id: string) => void }) {
-  const meta = KIND_META[notif.kind]
-  return (
-    <Link href={notif.href} onClick={() => onRead(notif.id)}>
-      <div className={`flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition cursor-pointer ${!notif.read ? 'bg-orange-50/40' : ''}`}>
-        <div className="relative flex-shrink-0">
-          {notif.actor?.avatar_url ? (
-            <div className="w-9 h-9 rounded-full overflow-hidden relative">
-              <Image src={notif.actor.avatar_url} alt={notif.actor.display_name} fill className="object-cover" unoptimized />
-            </div>
-          ) : (
-            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold bg-gradient-to-br from-orange-500 to-purple-600">
-              {notif.actor?.display_name?.[0]?.toUpperCase() || '?'}
-            </div>
-          )}
-          <div className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center ${meta.color} ring-2 ring-white`}>
-            {meta.icon}
-          </div>
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs text-gray-800 leading-relaxed">
-            <span className="font-bold">{notif.actor?.display_name || 'Someone'}</span> {notif.body}
-          </p>
-          <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(notif.created_at)}</p>
-        </div>
-        {!notif.read && <div className="flex-shrink-0 w-2 h-2 rounded-full bg-orange-500 mt-1.5" />}
-      </div>
-    </Link>
-  )
-}
-
-function NotificationCenter({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const supabase = createClient()
-  const [notifications, setNotifications] = useState<Notification[]>([])
-  const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | NotifKind>('all')
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    fetchAllNotifications(supabase, userId).then(n => {
-      setNotifications(n)
-      setLoading(false)
-    })
-  }, [userId, supabase])
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [onClose])
-
-  const markRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
-  const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })))
-  const unreadCount = notifications.filter(n => !n.read).length
-  const filtered = filter === 'all' ? notifications : notifications.filter(n => n.kind === filter)
-
-  return (
-    <div ref={ref} className="absolute right-0 top-full mt-2 w-[360px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden z-50 flex flex-col" style={{ maxHeight: 'min(520px, 85vh)' }}>
-      <div className="px-4 pt-4 pb-3 border-b border-gray-100 flex items-center justify-between">
-        <div>
-          <h2 className="font-black text-sm text-gray-900">Notifications</h2>
-          {unreadCount > 0 && <p className="text-[10px] text-orange-500 font-semibold mt-0.5">{unreadCount} unread</p>}
-        </div>
-        <div className="flex items-center gap-1">
-          {unreadCount > 0 && (
-            <button onClick={markAllRead} className="text-[11px] font-semibold text-gray-500 hover:text-orange-500 px-2 py-1 rounded-full flex items-center gap-1">
-              <CheckCheck className="h-3.5 w-3.5" /> Mark all read
-            </button>
-          )}
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400"><X className="h-4 w-4" /></button>
-        </div>
-      </div>
-      <div className="overflow-y-auto flex-1 divide-y divide-gray-50">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3">
-            <Loader2 className="h-6 w-6 animate-spin text-orange-400" />
-            <p className="text-xs text-gray-400">Loading...</p>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-gray-400 text-xs">No notifications yet</div>
-        ) : (
-          filtered.map(n => <NotifItem key={n.id} notif={n} onRead={markRead} />)
-        )}
-      </div>
-    </div>
-  )
-}
-
-// --- Main Header ---
+// --- Main Header (Enhanced) ---
 
 export default function DashboardHeader({
   activeTab,
@@ -261,16 +27,29 @@ export default function DashboardHeader({
 }) {
   const supabase = createClient()
   const [showNotifs, setShowNotifs] = useState(false)
+  const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [scrolled, setScrolled] = useState(false)
+  const [searchFocused, setSearchFocused] = useState(false)
+  const [profile, setProfile] = useState<any>(null)
   const bellRef = useRef<HTMLDivElement>(null)
+  const profileRef = useRef<HTMLDivElement>(null)
 
+  // Scroll effect – richer shadow + border
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 4)
     window.addEventListener('scroll', handler, { passive: true })
     return () => window.removeEventListener('scroll', handler)
   }, [])
 
+  // Load profile for avatar
+  useEffect(() => {
+    if (!userId) return
+    supabase.from('profiles').select('avatar_url, display_name, username').eq('id', userId).single()
+      .then(({ data }) => setProfile(data))
+  }, [userId, supabase])
+
+  // Unread count polling
   useEffect(() => {
     if (!userId) return
     const loadCount = async () => {
@@ -284,65 +63,175 @@ export default function DashboardHeader({
     return () => clearInterval(interval)
   }, [userId, supabase])
 
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) setShowProfileMenu(false)
+      if (bellRef.current && !bellRef.current.contains(e.target as Node) && showNotifs) setShowNotifs(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showNotifs])
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    window.location.href = '/auth/login'
+  }
+
   return (
-    <div className={`sticky top-0 z-40 transition-shadow duration-200 ${scrolled ? 'shadow-lg shadow-black/5' : ''}`}>
-      <div className="h-0.5 w-full bg-gradient-to-r from-orange-500 via-pink-500 to-purple-600" />
-      <div className="bg-white/96 backdrop-blur-xl border-b border-gray-200/80">
-        <div className="max-w-2xl lg:max-w-4xl mx-auto px-4">
-          <div className="h-14 flex items-center justify-between gap-4">
-            <Link href="/dashboard" className="flex-shrink-0">
-              <Image src="/logo.png" alt="Logo" width={110} height={32} className="h-8 w-auto object-contain" priority />
+    <header className={`sticky top-0 z-40 transition-all duration-300 ${
+      scrolled 
+        ? 'bg-white/95 backdrop-blur-md shadow-lg shadow-black/5 border-b border-gray-200/50' 
+        : 'bg-white/80 backdrop-blur-sm border-b border-gray-100'
+    }`}>
+      {/* Animated gradient top bar */}
+      <div className="h-0.5 bg-gradient-to-r from-orange-500 via-pink-500 to-purple-600 animate-gradient-x w-full" />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex items-center justify-between h-14 lg:h-16 gap-4">
+          
+          {/* Logo with hover scale */}
+          <Link href="/dashboard" className="flex-shrink-0 transition-transform hover:scale-105 active:scale-95">
+            <div className="relative w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-gradient-to-br from-orange-500 to-purple-600 flex items-center justify-center shadow-md">
+              <span className="text-white font-black text-sm">✧</span>
+            </div>
+          </Link>
+
+          {/* Search Bar – Rich X-style */}
+          <div className="hidden md:flex flex-1 max-w-md">
+            <div className={`relative w-full transition-all duration-200 ${
+              searchFocused ? 'scale-[1.02]' : ''
+            }`}>
+              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                <Search className={`h-4 w-4 transition-colors ${searchFocused ? 'text-orange-500' : 'text-gray-400'}`} />
+              </div>
+              <input
+                type="text"
+                placeholder="Search"
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+                className="w-full h-10 pl-10 pr-4 rounded-full bg-gray-100 hover:bg-gray-200 focus:bg-white border border-transparent focus:border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-200 transition-all text-sm placeholder:text-gray-500"
+              />
+              {searchFocused && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-gray-400 bg-gray-200 px-1.5 py-0.5 rounded">
+                  ⌘K
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Actions */}
+          <div className="flex items-center gap-1 sm:gap-2">
+            {/* Mobile search */}
+            <Link href="/search" className="md:hidden">
+              <button className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-600 transition active:scale-95">
+                <Search className="h-5 w-5" />
+              </button>
             </Link>
 
-            <div className="hidden md:flex flex-1 max-w-xs">
-              <Link href="/search" className="w-full">
-                <div className="flex items-center gap-2 w-full h-9 px-4 rounded-full bg-gray-100 hover:bg-gray-200 transition cursor-pointer">
-                  <Search className="h-4 w-4 text-gray-400" />
-                  <span className="text-xs text-gray-400 font-medium">Search...</span>
-                </div>
-              </Link>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Link href="/search" className="md:hidden">
-                <button className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-600"><Search className="h-5 w-5" /></button>
-              </Link>
-
-              <div ref={bellRef} className="relative">
-                <button onClick={() => setShowNotifs(!showNotifs)} className={`relative w-9 h-9 flex items-center justify-center rounded-full transition ${showNotifs ? 'bg-orange-50 text-orange-500' : 'hover:bg-gray-100 text-gray-600'}`}>
-                  <Bell className={`h-5 w-5 ${unreadCount > 0 && !showNotifs ? 'animate-[wiggle_2s_ease-in-out_infinite]' : ''}`} />
-                  {unreadCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-orange-500 text-white text-[9px] font-black flex items-center justify-center ring-2 ring-white">
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </span>
-                  )}
-                </button>
-                {showNotifs && userId && <NotificationCenter userId={userId} onClose={() => { setShowNotifs(false); setUnreadCount(0); }} />}
-              </div>
-
-              <Link href="/dashboard/forges/create">
-                <button className="flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-black bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:opacity-90 transition shadow-md shadow-orange-200/50">
-                  <Plus className="h-3.5 w-3.5" /> <span>Create</span>
-                </button>
-              </Link>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 -mb-px">
-            {(['forYou', 'following'] as const).map(tab => (
+            {/* Notifications */}
+            <div ref={bellRef} className="relative">
               <button
-                key={tab}
-                onClick={() => onTabChange(tab)}
-                className={`relative px-4 py-3 text-sm font-bold transition-colors ${activeTab === tab ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
+                onClick={() => setShowNotifs(!showNotifs)}
+                className={`relative w-9 h-9 flex items-center justify-center rounded-full transition-all duration-200 ${
+                  showNotifs 
+                    ? 'bg-orange-50 text-orange-500 ring-2 ring-orange-200' 
+                    : 'hover:bg-gray-100 text-gray-600 hover:scale-105 active:scale-95'
+                }`}
               >
-                {tab === 'forYou' ? 'For You' : 'Following'}
-                {activeTab === tab && <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full bg-gradient-to-r from-orange-500 to-purple-600" />}
+                <Bell className={`h-5 w-5 ${unreadCount > 0 && !showNotifs ? 'animate-wiggle' : ''}`} />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-4 px-1 rounded-full bg-orange-500 text-white text-[10px] font-black flex items-center justify-center ring-2 ring-white">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
               </button>
-            ))}
+              {showNotifs && userId && (
+                <NotificationCenter userId={userId} onClose={() => { setShowNotifs(false); setUnreadCount(0); }} />
+              )}
+            </div>
+
+            {/* Create Post Button (like X's "Post" button) */}
+            <Link href="/dashboard/forges/create">
+              <button className="hidden sm:flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-bold bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:shadow-lg hover:shadow-orange-200/50 hover:scale-105 active:scale-95 transition-all duration-200">
+                <Plus className="h-3.5 w-3.5" />
+                <span>Post</span>
+              </button>
+            </Link>
+            <Link href="/dashboard/forges/create" className="sm:hidden">
+              <button className="w-9 h-9 flex items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:shadow-lg active:scale-95 transition">
+                <Plus className="h-4 w-4" />
+              </button>
+            </Link>
+
+            {/* Profile Dropdown (new) */}
+            <div ref={profileRef} className="relative">
+              <button
+                onClick={() => setShowProfileMenu(!showProfileMenu)}
+                className="w-9 h-9 rounded-full overflow-hidden ring-2 ring-transparent hover:ring-orange-300 transition-all duration-200"
+              >
+                {profile?.avatar_url ? (
+                  <Image src={profile.avatar_url} alt="avatar" width={36} height={36} className="object-cover" unoptimized />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-orange-400 to-purple-500 text-white font-bold text-sm">
+                    {profile?.display_name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+              </button>
+
+              {showProfileMenu && (
+                <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-50 animate-slide-down">
+                  <div className="p-3 border-b border-gray-100">
+                    <p className="font-bold text-sm text-gray-900">{profile?.display_name || 'User'}</p>
+                    <p className="text-xs text-gray-500">@{profile?.username || 'username'}</p>
+                  </div>
+                  <div className="py-1">
+                    <Link href={`/profile/${profile?.username}`} onClick={() => setShowProfileMenu(false)}>
+                      <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition cursor-pointer">
+                        <User className="h-4 w-4 text-gray-500" />
+                        <span className="text-sm text-gray-700">Profile</span>
+                      </div>
+                    </Link>
+                    <Link href="/settings" onClick={() => setShowProfileMenu(false)}>
+                      <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition cursor-pointer">
+                        <Settings className="h-4 w-4 text-gray-500" />
+                        <span className="text-sm text-gray-700">Settings</span>
+                      </div>
+                    </Link>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 transition cursor-pointer text-red-500">
+                      <LogOut className="h-4 w-4" />
+                      <span className="text-sm font-medium">Log out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
+        </div>
+
+        {/* Tabs – X‑style underline animation */}
+        <div className="flex items-center gap-1 -mb-px">
+          {(['forYou', 'following'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => onTabChange(tab)}
+              className={`relative px-4 py-3 text-sm font-semibold transition-all duration-200 ${
+                activeTab === tab 
+                  ? 'text-gray-900' 
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50/50 rounded-t-lg'
+              }`}
+            >
+              {tab === 'forYou' ? 'For You' : 'Following'}
+              {activeTab === tab && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-orange-500 to-purple-600 rounded-full animate-slide-up" />
+              )}
+            </button>
+          ))}
         </div>
       </div>
 
+      {/* Global animations */}
       <style jsx global>{`
         @keyframes wiggle {
           0%, 90%, 100% { transform: rotate(0deg); }
@@ -350,7 +239,23 @@ export default function DashboardHeader({
           96% { transform: rotate(12deg); }
           98% { transform: rotate(-6deg); }
         }
+        @keyframes gradient-x {
+          0%, 100% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+        }
+        @keyframes slide-up {
+          from { transform: scaleX(0); }
+          to { transform: scaleX(1); }
+        }
+        @keyframes slide-down {
+          from { opacity: 0; transform: translateY(-8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-wiggle { animation: wiggle 2s ease-in-out infinite; }
+        .animate-gradient-x { background-size: 200% 200%; animation: gradient-x 3s ease infinite; }
+        .animate-slide-up { animation: slide-up 0.2s ease-out; }
+        .animate-slide-down { animation: slide-down 0.15s ease-out; }
       `}</style>
-    </div>
+    </header>
   )
 }

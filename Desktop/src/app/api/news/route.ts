@@ -1,9 +1,8 @@
 // app/api/news/route.ts
-// Parses Google News RSS — no API key required
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 
-const GOOGLE_NEWS_RSS =
+const GOOGLE_NEWS_RSS_BASE =
   'https://news.google.com/rss/search?q=technology+AI+programming&hl=en-US&gl=US&ceid=US:en'
 
 function extractImageFromDescription(html: string): string | undefined {
@@ -25,23 +24,49 @@ function decodeEntities(str: string): string {
     .replace(/&nbsp;/g, ' ')
 }
 
-// Google News links are redirects — extract the real article URL from the RSS item
 function extractRealUrl(googleUrl: string, rawXml: string, title: string): string {
-  // Try to find the source URL in the description block matching this item
-  // Fall back to the Google redirect URL itself (opens fine in browser)
+  // Google News links are redirects – we keep the original link (opens fine)
   return googleUrl
 }
 
-export async function GET() {
+// Shuffle array (Fisher-Yates)
+function shuffleArray<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
+export const runtime = 'nodejs'
+export async function GET(request: Request) {
   try {
-    const res = await fetch(GOOGLE_NEWS_RSS, {
+    const url = new URL(request.url)
+    const bust = url.searchParams.get('bust')   // e.g. ?bust=timestamp
+
+    // 1. Build RSS URL with optional cache buster
+    let rssUrl = GOOGLE_NEWS_RSS_BASE
+    if (bust) {
+      // Append a random query param to bypass Google's CDN cache
+      rssUrl += `&_cb=${Date.now()}&_rand=${Math.random()}`
+    }
+
+    // 2. Fetch RSS with appropriate cache settings
+    const fetchOptions: RequestInit = {
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; NewsReader/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; NewsReader/1.0)',
         Accept: 'application/rss+xml, application/xml, text/xml',
       },
-      next: { revalidate: 900 }, // cache 15 min
-    })
+    }
+
+    if (bust) {
+      // Force fresh fetch, no Next.js data cache
+      fetchOptions.cache = 'no-store'
+    } else {
+      // Normal mode: cache for 5 minutes
+      fetchOptions.next = { revalidate: 300 }
+    }
+
+    const res = await fetch(rssUrl, fetchOptions)
 
     if (!res.ok) {
       return NextResponse.json(
@@ -54,7 +79,7 @@ export async function GET() {
 
     // Parse <item> blocks
     const itemRegex = /<item>([\s\S]*?)<\/item>/g
-    const articles: any[] = []
+    let articles: any[] = []
     let match
 
     while ((match = itemRegex.exec(xml)) !== null && articles.length < 20) {
@@ -72,7 +97,6 @@ export async function GET() {
       if (!titleMatch || !linkMatch) continue
 
       const rawTitle = decodeEntities(titleMatch[1].trim())
-      // Google News titles include " - Source Name" — strip it
       const titleParts = rawTitle.split(' - ')
       const sourceName =
         sourceMatch ? decodeEntities(sourceMatch[1].trim()) :
@@ -85,15 +109,14 @@ export async function GET() {
       const urlToImage = extractImageFromDescription(descRaw)
       const description = stripHtml(decodeEntities(descRaw)).slice(0, 200)
 
-      const url = linkMatch[1].trim()
-      // Stable ID from URL
-      const id = crypto.createHash('md5').update(url).digest('hex')
+      const articleUrl = linkMatch[1].trim()
+      const id = crypto.createHash('md5').update(articleUrl).digest('hex')
 
       articles.push({
         id,
         title: cleanTitle,
         description,
-        url,
+        url: articleUrl,
         urlToImage: urlToImage || null,
         source: { name: sourceName },
         publishedAt: pubDateMatch
@@ -102,13 +125,24 @@ export async function GET() {
       })
     }
 
+    // 3. If bust is present, shuffle the articles to feel "new" even if RSS order is same
+    if (bust && articles.length > 0) {
+      articles = shuffleArray(articles)
+    }
+
+    // 4. Set response headers: force no caching when bust is used
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (bust) {
+      responseHeaders['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+    } else {
+      responseHeaders['Cache-Control'] = 'public, s-maxage=900, stale-while-revalidate=1800'
+    }
+
     return NextResponse.json(
       { articles, count: articles.length },
-      {
-        headers: {
-          'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=1800',
-        },
-      }
+      { headers: responseHeaders }
     )
   } catch (err: any) {
     console.error('[/api/news] Error:', err)

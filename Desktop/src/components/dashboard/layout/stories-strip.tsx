@@ -34,8 +34,10 @@ export default function StoriesStrip({
   } | null>(null)
   const [caption, setCaption] = useState('')
 
+  // Dynamic header height for sticky positioning
+  const [headerHeight, setHeaderHeight] = useState(80)
+
   // Fetch unexpired stories for the given users + current user
- 
   useEffect(() => {
     const userIds = users.map(u => u.id)
     if (currentUserId) {
@@ -59,6 +61,23 @@ export default function StoriesStrip({
         setStoriesByUser(grouped)
       })
   }, [users, currentUserId, supabase])
+
+  // Calculate header height on mount and when window resizes
+  useEffect(() => {
+    const updateHeight = () => {
+      // Target the DashboardHeader's outer div (sticky, top-0, z-40)
+      const header = document.querySelector('.sticky.top-0.z-40')
+      if (header) {
+        setHeaderHeight(header.clientHeight)
+      } else {
+        setHeaderHeight(80) // fallback
+      }
+    }
+
+    updateHeight()
+    window.addEventListener('resize', updateHeight)
+    return () => window.removeEventListener('resize', updateHeight)
+  }, [])
 
   // Handle file selection → open caption modal
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,7 +152,10 @@ export default function StoriesStrip({
 
   return (
     <>
-      <div className="bg-white border-b border-gray-100 py-3">
+      <div
+        className="sticky z-10 bg-white border-b border-gray-100 py-3"
+        style={{ top: `${headerHeight}px` }}
+      >
         <div className="max-w-2xl lg:max-w-4xl mx-auto px-4">
           <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
             {/* Add story button */}
@@ -162,8 +184,7 @@ export default function StoriesStrip({
             </div>
 
             {/* User stories */}
-      
-{users.filter(u => hasStory(u.id)).slice(0, 10).map(u => (
+            {users.filter(u => hasStory(u.id)).slice(0, 10).map(u => (
               <button
                 key={u.id}
                 onClick={() => hasStory(u.id) && onOpenStory(u.id)}

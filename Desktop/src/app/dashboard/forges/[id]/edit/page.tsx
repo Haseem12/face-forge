@@ -11,7 +11,13 @@ import FileSegmentEditor from '@/components/forges/FileSegmentEditor'
 import ContributorsPanel from '@/components/forges/ContributorsPanel'
 import ForgePreview from '@/components/forges/ForgePreview'
 import ForgeComments from '@/components/forges/ForgeComments'
-import { Code2, Users, Eye, MessageCircle } from 'lucide-react'
+import { Code2, Users, Eye, MessageCircle, Share2 } from 'lucide-react'
+import PublishForgeModal from '@/components/forges/PublishForgeModal'
+
+// Import layout components
+import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
+import StoriesStrip from '@/components/dashboard/layout/stories-strip'
+import StoryViewer from '@/components/dashboard/stories/story-viewer'
 
 interface Forge {
   id: string
@@ -20,6 +26,7 @@ interface Forge {
   is_collaborative: boolean
   is_public_preview: boolean
   preview_token: string | null
+  is_published?: boolean
 }
 
 interface ForgeFile {
@@ -52,6 +59,10 @@ interface ForgeComment {
 
 export default function EditForgePage({ params: paramsPromise }: { params: Promise<{ id: string }> }) {
   const params = use(paramsPromise)
+  const router = useRouter()
+  const supabase = createClient()
+
+  // Forge data state
   const [forge, setForge] = useState<Forge | null>(null)
   const [files, setFiles] = useState<ForgeFile[]>([])
   const [contributors, setContributors] = useState<Contributor[]>([])
@@ -60,23 +71,87 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
   const [notFound, setNotFound] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [isOwner, setIsOwner] = useState(false)
-  const router = useRouter()
-  const supabase = createClient()
+  const [showPublishModal, setShowPublishModal] = useState(false)
 
+  // Stories strip state
+  const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
+  const [followedProfiles, setFollowedProfiles] = useState<any[]>([])
+  const [suggestedUsers, setSuggestedUsers] = useState<any[]>([])
+  const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
+
+  // --- Load user data for header + stories ---
   useEffect(() => {
-    const getUser = async () => {
+    const loadUserData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      setCurrentUserId(user?.id || null)
-    }
-    getUser()
-  }, [supabase])
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+      setCurrentUserId(user.id)
 
+      // Own profile
+      const { data: myProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+      setCurrentUserProfile(myProfile)
+
+      // Following IDs
+      const { data: allies } = await supabase
+        .from('allies')
+        .select('following_id')
+        .eq('follower_id', user.id)
+      const followingIds = (allies || []).map((a: any) => a.following_id)
+
+      // Followed profiles (for stories)
+      if (followingIds.length > 0) {
+        const { data: fp } = await supabase
+          .from('profiles')
+          .select('id, display_name, username, avatar_url')
+          .in('id', followingIds)
+        setFollowedProfiles(fp || [])
+      }
+
+      // Suggested users (for stories strip – people to follow)
+      const { data: usersList } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, avatar_url')
+        .neq('id', user.id)
+        .limit(12)
+      const suggested = (usersList || []).filter((u: any) => !followingIds.includes(u.id))
+      setSuggestedUsers(suggested)
+    }
+
+    loadUserData()
+  }, [supabase, router])
+
+  // Combine users for StoriesStrip
+  const usersWithSelf: any[] = []
+  const seen = new Set<string>()
+  if (currentUserProfile) {
+    usersWithSelf.push(currentUserProfile)
+    seen.add(currentUserProfile.id)
+  }
+  followedProfiles.forEach(p => {
+    if (!seen.has(p.id)) {
+      usersWithSelf.push(p)
+      seen.add(p.id)
+    }
+  })
+  suggestedUsers.forEach(u => {
+    if (!seen.has(u.id)) {
+      usersWithSelf.push(u)
+      seen.add(u.id)
+    }
+  })
+
+  // --- Load forge data ---
   useEffect(() => {
     if (!params?.id) return
 
     const loadForge = async () => {
       try {
-        // Load forge data
         const forgeRes = await fetch(`/api/forges?id=${params.id}`)
         if (!forgeRes.ok) {
           if (forgeRes.status === 404) setNotFound(true)
@@ -93,20 +168,16 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
             setFiles(filesData.files || [])
           }
 
-          // Load contributors
           const contribRes = await fetch(`/api/forges/contributors?forge_id=${params.id}`)
           if (contribRes.ok) {
             const contribData = await contribRes.json()
             setContributors(contribData.contributors || [])
-
-            // Check if current user is owner
             if (currentUserId) {
               const owner = contribData.contributors?.find((c: Contributor) => c.user_id === currentUserId && c.role === 'owner')
               setIsOwner(!!owner)
             }
           }
 
-          // Load comments
           const commentsRes = await fetch(`/api/forges/comments?forge_id=${params.id}`)
           if (commentsRes.ok) {
             const commentsData = await commentsRes.json()
@@ -123,19 +194,15 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
     loadForge()
   }, [params, currentUserId])
 
+  // --- Handlers (unchanged from original) ---
   const handleAddFile = async (file: Omit<ForgeFile, 'id'>) => {
     if (!forge?.id) return
-
     try {
       const res = await fetch('/api/forges/files', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          forge_id: forge.id,
-          ...file,
-        }),
+        body: JSON.stringify({ forge_id: forge.id, ...file }),
       })
-
       if (res.ok) {
         const data = await res.json()
         setFiles([...files, data.file])
@@ -152,7 +219,6 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_id: fileId, content }),
       })
-
       if (res.ok) {
         setFiles(files.map(f => f.id === fileId ? { ...f, content } : f))
       }
@@ -168,7 +234,6 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_id: fileId }),
       })
-
       if (res.ok) {
         setFiles(files.filter(f => f.id !== fileId))
       }
@@ -179,18 +244,12 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
   const handleAddContributor = async (userId: string, role: string) => {
     if (!forge?.id) return
-
     try {
       const res = await fetch('/api/forges/contributors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          forge_id: forge.id,
-          user_id: userId,
-          role,
-        }),
+        body: JSON.stringify({ forge_id: forge.id, user_id: userId, role }),
       })
-
       if (res.ok) {
         const data = await res.json()
         setContributors([...contributors, data.contributor])
@@ -202,17 +261,12 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
   const handleRemoveContributor = async (userId: string) => {
     if (!forge?.id) return
-
     try {
       const res = await fetch('/api/forges/contributors', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          forge_id: forge.id,
-          user_id: userId,
-        }),
+        body: JSON.stringify({ forge_id: forge.id, user_id: userId }),
       })
-
       if (res.ok) {
         setContributors(contributors.filter(c => c.user_id !== userId))
       }
@@ -223,18 +277,12 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
   const handleAddComment = async (content: string, parentId?: string) => {
     if (!forge?.id || !currentUserId) return
-
     try {
       const res = await fetch('/api/forges/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          forge_id: forge.id,
-          content,
-          parent_comment_id: parentId || null,
-        }),
+        body: JSON.stringify({ forge_id: forge.id, content, parent_comment_id: parentId || null }),
       })
-
       if (res.ok) {
         const data = await res.json()
         setComments([...comments, data.comment])
@@ -251,7 +299,6 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ comment_id: commentId }),
       })
-
       if (res.ok) {
         setComments(comments.filter(c => c.id !== commentId))
       }
@@ -262,17 +309,12 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
   const handleTogglePublic = async (isPublic: boolean) => {
     if (!forge?.id) return
-
     try {
       const res = await fetch('/api/forges', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: forge.id,
-          is_public_preview: isPublic,
-        }),
+        body: JSON.stringify({ id: forge.id, is_public_preview: isPublic }),
       })
-
       if (res.ok) {
         const data = await res.json()
         setForge(data)
@@ -282,13 +324,31 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
     }
   }
 
+  const handlePublishForge = async (visibility: 'private' | 'public') => {
+    if (!forge?.id) return
+    try {
+      const res = await fetch('/api/forges', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: forge.id, is_published: true, is_public_preview: visibility === 'public' }),
+      })
+      if (!res.ok) throw new Error('Failed to publish forge')
+      const data = await res.json()
+      setForge(data)
+    } catch (error) {
+      console.error('[v0] Error publishing forge:', error)
+      throw error
+    }
+  }
+
+  // --- Loading skeleton (now includes header / stories strip placeholders) ---
   if (loading) {
     return (
-      <div className="w-full min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-        <Skeleton className="w-full h-24 mb-4" />
-        <div className="max-w-6xl mx-auto px-4">
-          <Skeleton className="w-64 h-8 mb-8" />
-          <Skeleton className="w-full h-96" />
+      <div className="min-h-screen bg-gray-50">
+        <DashboardHeader activeTab="forYou" onTabChange={() => {}} userId={currentUserId || undefined} />
+        <div className="max-w-6xl mx-auto px-4 py-6">
+          <Skeleton className="w-64 h-8 mb-4" />
+          <Skeleton className="w-full h-96 rounded-xl" />
         </div>
       </div>
     )
@@ -296,37 +356,63 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
   if (notFound || !forge) {
     return (
-      <div className="w-full min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">Forge not found</h1>
-          <p className="text-gray-600 mb-4">The forge you&apos;re looking for doesn&apos;t exist or you don&apos;t have access to it.</p>
-          <Link href="/dashboard">
-            <Button>Back to Dashboard</Button>
-          </Link>
+      <div className="min-h-screen bg-gray-50">
+        <DashboardHeader activeTab="forYou" onTabChange={() => {}} userId={currentUserId || undefined} />
+        <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
+          <div className="text-center">
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">Forge not found</h1>
+            <p className="text-gray-600 mb-4">The forge you're looking for doesn't exist or you don't have access to it.</p>
+            <Link href="/dashboard">
+              <Button>Back to Dashboard</Button>
+            </Link>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="w-full min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Header */}
-      <div className="sticky top-16 bg-white border-b border-gray-200 z-40">
-        <div className="max-w-6xl mx-auto px-4 py-4 md:py-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex-1">
-            <h1 className="text-xl md:text-2xl font-black text-gray-900">{forge.name}</h1>
-            <p className="text-xs md:text-sm text-gray-600 mt-1">
-              {forge.is_collaborative ? '🤝 Collaborative' : '👤 Solo'} • {forge.is_public_preview ? '🌍 Public' : '🔒 Private'}
+    <div className="min-h-screen bg-gray-50">
+      {/* Global Header */}
+      <DashboardHeader
+        activeTab="forYou"
+        onTabChange={() => {}}
+        userId={currentUserId || undefined}
+      />
+
+      {/* Stories Strip */}
+      <StoriesStrip
+        users={usersWithSelf}
+        currentUserId={currentUserId}
+        onOpenStory={setViewingStoryUserId}
+      />
+
+      {/* Forge Editing Interface */}
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {/* Forge title & actions */ }
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-black text-gray-900">{forge.name}</h1>
+            <p className="text-sm text-gray-600 mt-1">
+              {forge.is_collaborative ? '🤝 Collaborative' : '👤 Solo'} • {forge.is_public_preview ? '🌍 Public' : '🔒 Private'} {forge.is_published && '• ✅ Published'}
             </p>
           </div>
-          <Link href="/dashboard">
-            <Button variant="outline">Back to Dashboard</Button>
-          </Link>
+          <div className="flex gap-2">
+            {isOwner && !forge.is_published && (
+              <Button
+                onClick={() => setShowPublishModal(true)}
+                className="gap-2 bg-gradient-to-r from-orange-500 to-purple-600 hover:from-orange-600 hover:to-purple-700 text-white font-bold"
+              >
+                <Share2 className="w-4 h-4" />
+                Publish Forge
+              </Button>
+            )}
+            <Link href="/dashboard">
+              <Button variant="outline">Back to Dashboard</Button>
+            </Link>
+          </div>
         </div>
-      </div>
 
-      {/* Tabs */}
-      <div className="max-w-6xl mx-auto px-4 py-6">
         {forge.is_collaborative ? (
           <Tabs defaultValue="files" className="w-full">
             <TabsList className="grid w-full grid-cols-4 mb-6 bg-white border border-gray-200 p-1 rounded-lg">
@@ -390,11 +476,27 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
             </TabsContent>
           </Tabs>
         ) : (
-          <div className="bg-white border border-gray-200 rounded-lg p-6 text-center">
-            <p className="text-gray-600">This forge is not set up for collaboration. Enable collaborative mode to access file editor, contributors, and comments.</p>
+          <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
+            <p className="text-gray-600">
+              This forge is not set up for collaboration. Enable collaborative mode to access file editor, contributors, and comments.
+            </p>
           </div>
         )}
       </div>
+
+      {/* Story Viewer Modal */}
+      {viewingStoryUserId && (
+        <StoryViewer userId={viewingStoryUserId} onClose={() => setViewingStoryUserId(null)} />
+      )}
+
+      {/* Publish Modal */}
+      <PublishForgeModal
+        forgeId={forge?.id || ''}
+        forgeName={forge?.name || ''}
+        isOpen={showPublishModal}
+        onClose={() => setShowPublishModal(false)}
+        onPublish={handlePublishForge}
+      />
     </div>
   )
 }

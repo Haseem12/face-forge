@@ -96,16 +96,17 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json()
-    const { id, name, description, config, is_published, custom_code } = body
+    const { id, name, description, config, is_published, is_public_preview, custom_code } = body
 
     const { data, error } = await supabase
       .from('forges')
       .update({
-        name,
-        description,
-        config,
-        is_published,
-        custom_code,
+        ...(name && { name }),
+        ...(description !== undefined && { description }),
+        ...(config && { config }),
+        ...(is_published !== undefined && { is_published }),
+        ...(is_public_preview !== undefined && { is_public_preview }),
+        ...(custom_code && { custom_code }),
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
