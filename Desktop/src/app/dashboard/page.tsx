@@ -474,14 +474,16 @@ const refreshNews = useCallback(async () => {
       {/* FAB */}
       <ThreeCurveFab />
 
-      {commentPanel && (
-        <CommentPanel
-          articleId={commentPanel.articleId}
-          forgeId={commentPanel.forgeId}
-          currentUser={user}
-          onClose={() => setCommentPanel(null)}
-        />
-      )}
+    {commentPanel && (
+  <div className="fixed inset-0 z-[60]">
+    <CommentPanel
+      articleId={commentPanel.articleId}
+      forgeId={commentPanel.forgeId}
+      currentUser={user}
+      onClose={() => setCommentPanel(null)}
+    />
+  </div>
+)}
 
       {viewingStoryUserId && (
         <StoryViewer userId={viewingStoryUserId} onClose={() => setViewingStoryUserId(null)} />
