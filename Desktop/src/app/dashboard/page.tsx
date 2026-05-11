@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,6 +20,7 @@ import NewsCard from '@/components/dashboard/cards/news-card'
 import ForgeCard from '@/components/dashboard/cards/forge-card'
 import CardSkeleton from '@/components/dashboard/cards/card-skeleton'
 import CommentPanel from '@/components/dashboard/comments/comment-panel'
+import ArticleReader from '@/components/dashboard/news/article-reader'
 
 export default function DashboardPage() {
   const supabase = createClient()
@@ -30,7 +31,7 @@ export default function DashboardPage() {
   const [newsItems, setNewsItems] = useState<NewsArticle[]>([])
   const [suggestedUsers, setSuggested] = useState<any[]>([])
   const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
-  const [followedProfiles, setFollowedProfiles] = useState<any[]>([]) // NEW: profiles of allies
+  const [followedProfiles, setFollowedProfiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [newsLoading, setNewsLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
@@ -44,6 +45,14 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'forYou' | 'following'>('forYou')
   const [commentPanel, setCommentPanel] = useState<{ articleId?: string; forgeId?: string } | null>(null)
   const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
+  
+  // New states for infinite scroll and article reader
+  const [displayedNews, setDisplayedNews] = useState<NewsArticle[]>([])
+  const [newsPage, setNewsPage] = useState(1)
+  const [hasMoreNews, setHasMoreNews] = useState(true)
+  const [selectedArticle, setSelectedArticle] = useState<NewsArticle | null>(null)
+  const [currentArticleIndex, setCurrentArticleIndex] = useState(0)
+  const observerTarget = useRef<HTMLDivElement>(null)
 
   // ── Data Loading ───────────────────────────────────────────────────────────
   const loadNews = useCallback(async (currentUser: any) => {
@@ -82,6 +91,37 @@ export default function DashboardPage() {
     }
   }, [supabase])
 
+  // Update displayed news when newsItems change (for infinite scroll)
+  useEffect(() => {
+    if (newsItems.length > 0) {
+      setDisplayedNews(newsItems.slice(0, 5))
+      setHasMoreNews(newsItems.length > 5)
+      setNewsPage(1)
+    }
+  }, [newsItems])
+
+  // Infinite scroll observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMoreNews && !newsLoading && newsItems.length > 0 && !showAllNews) {
+          const nextPage = newsPage + 1
+          const nextItems = newsItems.slice(0, nextPage * 5)
+          setDisplayedNews(nextItems)
+          setNewsPage(nextPage)
+          setHasMoreNews(nextItems.length < newsItems.length)
+        }
+      },
+      { threshold: 0.1, rootMargin: '100px' }
+    )
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current)
+    }
+
+    return () => observer.disconnect()
+  }, [hasMoreNews, newsLoading, newsPage, newsItems, showAllNews])
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -89,16 +129,13 @@ export default function DashboardPage() {
         if (!au) { router.push('/auth/login'); return }
         setUser(au)
 
-        // Load own profile
         const { data: myProfile } = await supabase.from('profiles').select('*').eq('id', au.id).single()
         if (myProfile) setCurrentUserProfile(myProfile)
 
-        // Load following (allies) IDs
         const { data: alliesData } = await supabase.from('allies').select('following_id').eq('follower_id', au.id)
         const followSet = new Set<string>((alliesData || []).map((a: any) => a.following_id))
         setFollowing(followSet)
 
-        // ---- NEW: Fetch profiles of followed users (allies) ----
         const followingIds = Array.from(followSet)
         if (followingIds.length > 0) {
           const { data: fp } = await supabase
@@ -110,7 +147,6 @@ export default function DashboardPage() {
           setFollowedProfiles([])
         }
 
-        // Load forges (published)
         const sel = `id,name,description,template_type,user_id,created_at,is_published,profiles:user_id(id,display_name,username,avatar_url)`
         const { data: forges } = await supabase.from('forges').select(sel).eq('is_published', true).order('created_at', { ascending: false }).limit(30)
         setFeedItems(forges || [])
@@ -122,11 +158,9 @@ export default function DashboardPage() {
           setForgeCC(cc)
         }
 
-        // Load suggested users (not followed, not current)
         const { data: users } = await supabase.from('profiles').select('id,display_name,username,avatar_url').neq('id', au.id).limit(12)
         setSuggested((users || []).filter((u: any) => !followSet.has(u.id)))
 
-        // Load liked forges
         const { data: liked } = await supabase.from('interactions').select('forge_id').eq('user_id', au.id).eq('interaction_type', 'like')
         setLikedForges(new Set((liked || []).map((i: any) => i.forge_id)))
 
@@ -172,11 +206,35 @@ export default function DashboardPage() {
     setTimeout(() => setShareCopied(null), 2000)
   }
 
-  // ── Derived View Logic ─────────────────────────────────────────────────────
-  const visibleNews = showAllNews ? newsItems : newsItems.slice(0, 4)
-  const followingForges = feedItems.filter(f => following.has(f.user_id))
+  // Article reader navigation
+  const handleReadInside = (article: NewsArticle, index: number) => {
+    setCurrentArticleIndex(index)
+    setSelectedArticle(article)
+  }
 
-  // ---- NEW: Correctly combine users for stories strip ----
+  const handleNextArticle = () => {
+    const currentList = showAllNews ? newsItems : displayedNews
+    if (currentArticleIndex < currentList.length - 1) {
+      const nextIndex = currentArticleIndex + 1
+      setCurrentArticleIndex(nextIndex)
+      setSelectedArticle(currentList[nextIndex])
+    }
+  }
+
+  const handlePreviousArticle = () => {
+    const currentList = showAllNews ? newsItems : displayedNews
+    if (currentArticleIndex > 0) {
+      const prevIndex = currentArticleIndex - 1
+      setCurrentArticleIndex(prevIndex)
+      setSelectedArticle(currentList[prevIndex])
+    }
+  }
+
+  // ── Derived View Logic ─────────────────────────────────────────────────────
+  const visibleNews = showAllNews ? newsItems : displayedNews
+  const followingForges = feedItems.filter(f => following.has(f.user_id))
+  const currentNewsList = showAllNews ? newsItems : displayedNews
+
   const usersWithSelf: any[] = []
   const seen = new Set<string>()
 
@@ -245,7 +303,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* News Feed Section */}
+              {/* News Feed Section with Infinite Scroll */}
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
@@ -257,20 +315,33 @@ export default function DashboardPage() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {visibleNews.map(a => (
-                    <div key={a?.id || Math.random()} className="flex justify-center">
-                      <NewsCard
-                        article={a}
-                        isLiked={likedNews.has(a.id)}
-                        commentCount={newsCC[a.id] || 0}
-                        shareCopied={shareCopied === a.id}
-                        onLike={() => handleNewsLike(a.id)}
-                        onComment={() => setCommentPanel({ articleId: a.id })}
-                        onShare={() => handleShare(a.url, a.id)}
-                      />
-                    </div>
+                <div className="space-y-4">
+                  {visibleNews.map((article, idx) => (
+                    <NewsCard
+                      key={article.id}
+                      article={article}
+                      isLiked={likedNews.has(article.id)}
+                      commentCount={newsCC[article.id] || 0}
+                      shareCopied={shareCopied === article.id}
+                      onLike={() => handleNewsLike(article.id)}
+                      onComment={() => setCommentPanel({ articleId: article.id })}
+                      onShare={() => handleShare(article.url, article.id)}
+                      onReadInside={() => handleReadInside(article, idx)}
+                    />
                   ))}
+                  
+                  {/* Loading indicator for infinite scroll */}
+                  {!showAllNews && hasMoreNews && !newsLoading && newsItems.length > 0 && (
+                    <div ref={observerTarget} className="flex justify-center py-4">
+                      <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                  
+                  {newsLoading && (
+                    <div className="flex justify-center py-8">
+                      <div className="w-8 h-8 border-3 border-gray-200 border-t-orange-500 rounded-full animate-spin" />
+                    </div>
+                  )}
                 </div>
               </section>
             </>
@@ -320,8 +391,7 @@ export default function DashboardPage() {
       </main>
 
       {/* FAB: Create Button */}
-
-        <ThreeCurveFab />
+      <ThreeCurveFab />
 
       {commentPanel && (
         <CommentPanel
@@ -334,6 +404,18 @@ export default function DashboardPage() {
 
       {viewingStoryUserId && (
         <StoryViewer userId={viewingStoryUserId} onClose={() => setViewingStoryUserId(null)} />
+      )}
+
+      {/* Article Reader Modal */}
+      {selectedArticle && (
+        <ArticleReader
+          article={selectedArticle}
+          onClose={() => setSelectedArticle(null)}
+          onNext={handleNextArticle}
+          onPrevious={handlePreviousArticle}
+          hasNext={currentArticleIndex < currentNewsList.length - 1}
+          hasPrevious={currentArticleIndex > 0}
+        />
       )}
     </div>
   )
