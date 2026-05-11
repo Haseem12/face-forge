@@ -1,0 +1,4 @@
+[build]
+  base = "Desktop/src"
+  command = "rm -f pnpm-lock.yaml && npm install && npm run build"
+  publish = ".next"
