@@ -20,7 +20,7 @@ import NewsCard from '@/components/dashboard/cards/news-card'
 import ForgeCard from '@/components/dashboard/cards/forge-card'
 import CardSkeleton from '@/components/dashboard/cards/card-skeleton'
 import CommentPanel from '@/components/dashboard/comments/comment-panel'
-import ArticleReader from '@/components/dashboard/news/article-reader'
+import ArticleReader from '@/components/dashboard/news/ArticleReader'
 
 export default function DashboardPage() {
   const supabase = createClient()
