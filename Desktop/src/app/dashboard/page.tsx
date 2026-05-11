@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Flame, TrendingUp, Zap, Plus
+  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell
 } from 'lucide-react'
 import Link from 'next/link'
 import ThreeCurveFab from '@/components/dashboard/layout/three-curve-fab'
@@ -22,11 +22,27 @@ import CardSkeleton from '@/components/dashboard/cards/card-skeleton'
 import CommentPanel from '@/components/dashboard/comments/comment-panel'
 import ArticleReader from '@/components/dashboard/news/ArticleReader'
 
+// Helper for time ago
+function timeAgo(date: string | Date): string {
+  const now = new Date()
+  const past = new Date(date)
+  const diffMs = now.getTime() - past.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+  
+  if (diffMins < 1) return 'just now'
+  if (diffMins < 60) return `${diffMins}m`
+  if (diffHours < 24) return `${diffHours}h`
+  if (diffDays < 7) return `${diffDays}d`
+  return past.toLocaleDateString()
+}
+
 export default function DashboardPage() {
   const supabase = createClient()
   const router = useRouter()
 
-  // ── State ──────────────────────────────────────────────────────────────────
+  // ── Existing State ──────────────────────────────────────────────────────────
   const [feedItems, setFeedItems] = useState<ForgeFeed[]>([])
   const [newsItems, setNewsItems] = useState<NewsArticle[]>([])
   const [suggestedUsers, setSuggested] = useState<any[]>([])
@@ -46,19 +62,23 @@ export default function DashboardPage() {
   const [commentPanel, setCommentPanel] = useState<{ articleId?: string; forgeId?: string } | null>(null)
   const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
   
-  // New states for infinite scroll and article reader
+  // ── New State for Auto-Refresh & Infinite Scroll ───────────────────────────
   const [displayedNews, setDisplayedNews] = useState<NewsArticle[]>([])
   const [newsPage, setNewsPage] = useState(1)
   const [hasMoreNews, setHasMoreNews] = useState(true)
   const [selectedArticle, setSelectedArticle] = useState<NewsArticle | null>(null)
   const [currentArticleIndex, setCurrentArticleIndex] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [showRefreshToast, setShowRefreshToast] = useState(false)
   const observerTarget = useRef<HTMLDivElement>(null)
 
-  // ── Data Loading ───────────────────────────────────────────────────────────
-  const loadNews = useCallback(async (currentUser: any) => {
+  // ── Load News with Cache Busting ──────────────────────────────────────────
+  const loadNews = useCallback(async (currentUser: any, forceRefresh = false) => {
     setNewsLoading(true)
     try {
-      const res = await fetch('/api/news')
+      const bustParam = forceRefresh ? `?bust=${Date.now()}` : ''
+      const res = await fetch(`/api/news${bustParam}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       
@@ -71,7 +91,9 @@ export default function DashboardPage() {
         source: a.source || { name: 'News' },
         publishedAt: a.publishedAt,
       }))
+      
       setNewsItems(articles)
+      setLastUpdated(new Date())
 
       if (currentUser && articles.length) {
         const ids = articles.map(a => a.id)
@@ -91,22 +113,68 @@ export default function DashboardPage() {
     }
   }, [supabase])
 
-  // Update displayed news when newsItems change (for infinite scroll)
+  // ── Auto-Refresh News Every 5 Minutes ─────────────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (user) {
+        refreshNews()
+      }
+    }, 5 * 60 * 1000) // 5 minutes
+    
+    return () => clearInterval(interval)
+  }, [user])
+
+  // ── Refresh on Tab Focus ──────────────────────────────────────────────────
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user) {
+        // Refresh if last update was more than 2 minutes ago
+        if (!lastUpdated || (Date.now() - lastUpdated.getTime()) > 2 * 60 * 1000) {
+          refreshNews()
+        }
+      }
+    }
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [lastUpdated, user])
+
+  // ── Manual Refresh Handler ────────────────────────────────────────────────
+  const refreshNews = useCallback(async () => {
+    if (refreshing || !user) return
+    
+    setRefreshing(true)
+    try {
+      await loadNews(user, true)
+      setShowRefreshToast(true)
+      setTimeout(() => setShowRefreshToast(false), 3000)
+    } catch (error) {
+      console.error('Failed to refresh news:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [refreshing, user, loadNews])
+
+  // ── Update displayed news when newsItems change (for infinite scroll) ─────
   useEffect(() => {
     if (newsItems.length > 0) {
-      setDisplayedNews(newsItems.slice(0, 5))
-      setHasMoreNews(newsItems.length > 5)
+      const initialCount = showAllNews ? newsItems.length : Math.min(5, newsItems.length)
+      setDisplayedNews(newsItems.slice(0, initialCount))
+      setHasMoreNews(!showAllNews && newsItems.length > initialCount)
       setNewsPage(1)
     }
-  }, [newsItems])
+  }, [newsItems, showAllNews])
 
-  // Infinite scroll observer
+  // ── Infinite scroll observer ──────────────────────────────────────────────
   useEffect(() => {
+    if (showAllNews) return
+    
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMoreNews && !newsLoading && newsItems.length > 0 && !showAllNews) {
+        if (entries[0].isIntersecting && hasMoreNews && !newsLoading && newsItems.length > 0) {
           const nextPage = newsPage + 1
-          const nextItems = newsItems.slice(0, nextPage * 5)
+          const itemsToShow = nextPage * 5
+          const nextItems = newsItems.slice(0, itemsToShow)
           setDisplayedNews(nextItems)
           setNewsPage(nextPage)
           setHasMoreNews(nextItems.length < newsItems.length)
@@ -122,6 +190,7 @@ export default function DashboardPage() {
     return () => observer.disconnect()
   }, [hasMoreNews, newsLoading, newsPage, newsItems, showAllNews])
 
+  // ── Existing useEffect for user data loading ──────────────────────────────
   useEffect(() => {
     const load = async () => {
       try {
@@ -143,8 +212,6 @@ export default function DashboardPage() {
             .select('id, display_name, username, avatar_url')
             .in('id', followingIds)
           setFollowedProfiles(fp || [])
-        } else {
-          setFollowedProfiles([])
         }
 
         const sel = `id,name,description,template_type,user_id,created_at,is_published,profiles:user_id(id,display_name,username,avatar_url)`
@@ -165,7 +232,7 @@ export default function DashboardPage() {
         setLikedForges(new Set((liked || []).map((i: any) => i.forge_id)))
 
         setLoading(false)
-        loadNews(au)
+        await loadNews(au)
       } catch (e) {
         setLoading(false)
       }
@@ -231,7 +298,6 @@ export default function DashboardPage() {
   }
 
   // ── Derived View Logic ─────────────────────────────────────────────────────
-  const visibleNews = showAllNews ? newsItems : displayedNews
   const followingForges = feedItems.filter(f => following.has(f.user_id))
   const currentNewsList = showAllNews ? newsItems : displayedNews
 
@@ -303,34 +369,50 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* News Feed Section with Infinite Scroll */}
+              {/* News Feed Section with Auto-Refresh */}
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <Flame className="h-5 w-5 text-orange-500" />
                     <h2 className="text-sm font-black text-gray-900 uppercase tracking-tight">Top Stories</h2>
+                    {lastUpdated && (
+                      <span className="text-[10px] text-gray-400 ml-2">
+                        Updated {timeAgo(lastUpdated)} ago
+                      </span>
+                    )}
                   </div>
-                  <button onClick={() => setShowAllNews(!showAllNews)} className="text-xs font-bold text-orange-500">
-                    {showAllNews ? 'Show Less' : 'See All'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={refreshNews}
+                      disabled={refreshing}
+                      className={`p-1.5 rounded-full transition ${
+                        refreshing ? 'animate-spin text-orange-500' : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50'
+                      }`}
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => setShowAllNews(!showAllNews)} className="text-xs font-bold text-orange-500">
+                      {showAllNews ? 'Show Less' : 'See All'}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
-                  {visibleNews.map((article, idx) => (
-  <NewsCard
-    key={article.id}
-    article={article}
-    isLiked={likedNews.has(article.id)}
-    commentCount={newsCC[article.id] || 0}
-    shareCopied={shareCopied === article.id}
-    onLike={() => handleNewsLike(article.id)}
-    onComment={() => setCommentPanel({ articleId: article.id })}
-    onShare={() => handleShare(article.url, article.id)}
-    onReadInside={() => handleReadInside(article, idx)}
-  />
-))}
+                  {currentNewsList.map((article, idx) => (
+                    <NewsCard
+                      key={article.id}
+                      article={article}
+                      isLiked={likedNews.has(article.id)}
+                      commentCount={newsCC[article.id] || 0}
+                      shareCopied={shareCopied === article.id}
+                      onLike={() => handleNewsLike(article.id)}
+                      onComment={() => setCommentPanel({ articleId: article.id })}
+                      onShare={() => handleShare(article.url, article.id)}
+                      onReadInside={() => handleReadInside(article, idx)}
+                    />
+                  ))}
                   
-                  {/* Loading indicator for infinite scroll */}
+                  {/* Infinite scroll observer */}
                   {!showAllNews && hasMoreNews && !newsLoading && newsItems.length > 0 && (
                     <div ref={observerTarget} className="flex justify-center py-4">
                       <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
@@ -378,7 +460,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Sidebar remains to help users find more creators */}
+        {/* Sidebar */}
         <aside className="hidden lg:block">
           <div className="sticky top-24">
             <Sidebar
@@ -390,7 +472,7 @@ export default function DashboardPage() {
         </aside>
       </main>
 
-      {/* FAB: Create Button */}
+      {/* FAB */}
       <ThreeCurveFab />
 
       {commentPanel && (
@@ -406,21 +488,31 @@ export default function DashboardPage() {
         <StoryViewer userId={viewingStoryUserId} onClose={() => setViewingStoryUserId(null)} />
       )}
 
-     {/* Article Reader Modal */}
-{selectedArticle && (
-  <ArticleReader
-    article={selectedArticle}
-    onClose={() => setSelectedArticle(null)}
-    onNext={handleNextArticle}
-    onPrevious={handlePreviousArticle}
-    hasNext={currentArticleIndex < currentNewsList.length - 1}
-    hasPrevious={currentArticleIndex > 0}
-    isLiked={likedNews.has(selectedArticle.id)}
-    commentCount={newsCC[selectedArticle.id] || 0}
-    onLike={() => handleNewsLike(selectedArticle.id)}
-    onComment={() => setCommentPanel({ articleId: selectedArticle.id })}
-  />
-)}
+      {/* Article Reader Modal */}
+      {selectedArticle && (
+        <ArticleReader
+          article={selectedArticle}
+          onClose={() => setSelectedArticle(null)}
+          onNext={handleNextArticle}
+          onPrevious={handlePreviousArticle}
+          hasNext={currentArticleIndex < currentNewsList.length - 1}
+          hasPrevious={currentArticleIndex > 0}
+          isLiked={likedNews.has(selectedArticle.id)}
+          commentCount={newsCC[selectedArticle.id] || 0}
+          onLike={() => handleNewsLike(selectedArticle.id)}
+          onComment={() => setCommentPanel({ articleId: selectedArticle.id })}
+        />
+      )}
+
+      {/* Refresh Toast Notification */}
+      {showRefreshToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+          <div className="bg-gray-900 text-white px-4 py-2 rounded-full text-sm flex items-center gap-2 shadow-lg">
+            <RefreshCw className="h-4 w-4" />
+            News refreshed with latest articles!
+          </div>
+        </div>
+      )}
     </div>
   )
 }
