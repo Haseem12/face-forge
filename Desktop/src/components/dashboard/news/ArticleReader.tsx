@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { 
   X, Bookmark, Share2, ChevronLeft, ChevronRight, 
   Heart, MessageCircle, Eye, Clock, ArrowLeft, Check
@@ -47,13 +47,24 @@ export default function ArticleReader({
   const [showShareMenu, setShowShareMenu] = useState(false)
   const [fullContent, setFullContent] = useState<string>('')
   const [copied, setCopied] = useState(false)
-  const [articleTitle, setArticleTitle] = useState(article.title)
-  const [articleImage, setArticleImage] = useState(article.urlToImage)
+  const [articleTitle, setArticleTitle] = useState(article?.title || '')
+  const [articleImage, setArticleImage] = useState(article?.urlToImage || null)
 
-  // Fetch full article content using multiple methods
+  // Reset and fetch when article changes
   useEffect(() => {
+    // Reset all states when article changes
+    setLoading(true)
+    setFullContent('')
+    setArticleTitle(article?.title || '')
+    setArticleImage(article?.urlToImage || null)
+    setCopied(false)
+    setShowShareMenu(false)
+    
     const fetchFullContent = async () => {
-      setLoading(true)
+      if (!article?.url) {
+        setLoading(false)
+        return
+      }
       
       try {
         // Method 1: Try our API route
@@ -69,7 +80,7 @@ export default function ArticleReader({
           }
         }
         
-        // Method 2: Use article.content from RSS (often has truncated text)
+        // Method 2: Use article.content from RSS
         if (article.content && article.content.length > 100) {
           setFullContent(article.content)
           setLoading(false)
@@ -78,7 +89,6 @@ export default function ArticleReader({
         
         // Method 3: Use description as fallback
         if (article.description && article.description.length > 50) {
-          // Clean HTML from description
           const cleanText = article.description
             .replace(/<[^>]*>/g, '')
             .replace(/&nbsp;/g, ' ')
@@ -93,25 +103,25 @@ export default function ArticleReader({
           return
         }
         
-        // Method 4: Create expanded content based on title and source
+        // Method 4: Create expanded content
         setFullContent(`
-          ${article.description || 'Read the full article on the original source for complete coverage.'}
-          
-          This article from ${article.source?.name} covers important developments in technology and innovation.
-          
-          For the complete story, detailed analysis, and expert insights, please visit the original source.
-          
-          Stay informed with the latest updates on this topic and more.
+${article.description || 'Read the full article on the original source for complete coverage.'}
+
+This article from ${article.source?.name} covers important developments in technology and innovation.
+
+For the complete story, detailed analysis, and expert insights, please visit the original source.
+
+Stay informed with the latest updates on this topic and more.
         `)
         
       } catch (error) {
         console.error('Failed to fetch full content:', error)
         setFullContent(`
-          We're having trouble loading the full article content.
-          
-          Please click the "Read Original" link below to view the complete article on ${article.source?.name}.
-          
-          We apologize for the inconvenience.
+We're having trouble loading the full article content.
+
+Please click the "Read Original" link below to view the complete article on ${article.source?.name}.
+
+We apologize for the inconvenience.
         `)
       } finally {
         setLoading(false)
@@ -119,7 +129,7 @@ export default function ArticleReader({
     }
     
     fetchFullContent()
-  }, [article.url, article.description, article.content, article.source?.name])
+  }, [article?.url, article?.description, article?.content, article?.source?.name, article?.title, article?.urlToImage])
 
   // Handle escape key
   useEffect(() => {
@@ -132,7 +142,7 @@ export default function ArticleReader({
 
   const handleShare = async () => {
     try {
-      await navigator.clipboard.writeText(article.url)
+      await navigator.clipboard.writeText(article?.url || '')
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
       setShowShareMenu(false)
@@ -141,23 +151,19 @@ export default function ArticleReader({
     }
   }
 
-  // Clean HTML content and convert to plain text with proper formatting
+  // Clean HTML content
   const cleanHtmlContent = (html: string): string => {
     if (!html) return ''
     
     let text = html
-      // Remove script tags and their content
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      // Remove style tags and their content
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      // Remove HTML tags but keep line breaks
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/p>/gi, '\n\n')
       .replace(/<p[^>]*>/gi, '')
       .replace(/<div[^>]*>/gi, '')
       .replace(/<\/div>/gi, '\n')
       .replace(/<[^>]*>/g, '')
-      // Decode HTML entities
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
@@ -165,24 +171,21 @@ export default function ArticleReader({
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
       .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
-      // Remove extra whitespace
       .replace(/\n\s*\n/g, '\n\n')
       .trim()
     
     return text
   }
 
-  // Format content with proper paragraphs
+  // Format content with paragraphs
   const formatContent = (content: string) => {
     if (!content) return null
     
-    // Clean HTML if present
     let cleanContent = content
     if (content.includes('<') && content.includes('>')) {
       cleanContent = cleanHtmlContent(content)
     }
     
-    // Split by double newlines or create paragraphs
     const paragraphs = cleanContent.split(/\n\s*\n/).filter(p => p.trim())
     
     if (paragraphs.length === 0) {
@@ -196,9 +199,11 @@ export default function ArticleReader({
     ))
   }
 
+  if (!article) return null
+
   return (
     <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
-      {/* Header with gradient */}
+      {/* Header */}
       <div className="sticky top-0 z-10 bg-white/98 backdrop-blur-md border-b border-gray-100 shadow-sm">
         <div className="max-w-4xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
@@ -389,7 +394,7 @@ export default function ArticleReader({
         </div>
       </div>
 
-      {/* Bottom Action Bar - Now with working like/comment/save */}
+      {/* Bottom Action Bar */}
       <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-100 py-3 z-10 shadow-lg">
         <div className="max-w-4xl mx-auto px-4">
           <div className="flex items-center justify-between">
@@ -432,43 +437,16 @@ export default function ArticleReader({
 
       <style jsx global>{`
         @keyframes fade-in {
-          from {
-            opacity: 0;
-            transform: translateY(-8px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+          from { opacity: 0; transform: translateY(-8px); }
+          to { opacity: 1; transform: translateY(0); }
         }
-        .animate-fade-in {
-          animation: fade-in 0.15s ease-out;
-        }
+        .animate-fade-in { animation: fade-in 0.15s ease-out; }
         
-        .prose {
-          font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        }
-        
-        .prose p {
-          margin-bottom: 1.5rem;
-          line-height: 1.7;
-        }
-        
-        .prose h2, .prose h3 {
-          margin-top: 2rem;
-          margin-bottom: 1rem;
-          font-weight: 700;
-          color: #1f2937;
-        }
-        
-        .prose ul, .prose ol {
-          margin-bottom: 1.5rem;
-          padding-left: 1.5rem;
-        }
-        
-        .prose li {
-          margin-bottom: 0.5rem;
-        }
+        .prose { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        .prose p { margin-bottom: 1.5rem; line-height: 1.7; }
+        .prose h2, .prose h3 { margin-top: 2rem; margin-bottom: 1rem; font-weight: 700; color: #1f2937; }
+        .prose ul, .prose ol { margin-bottom: 1.5rem; padding-left: 1.5rem; }
+        .prose li { margin-bottom: 0.5rem; }
       `}</style>
     </div>
   )
