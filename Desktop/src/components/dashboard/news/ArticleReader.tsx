@@ -69,8 +69,6 @@ export default function ArticleReader({
   const [showShareMenu, setShowShareMenu] = useState(false)
   const [fullContent, setFullContent] = useState<string>('')
   const [copied, setCopied] = useState(false)
-
-  // Fix 3: local like/comment state as fallback when parent doesn't manage it
   const [localLiked, setLocalLiked] = useState(isLiked)
   const [localCommentCount, setLocalCommentCount] = useState(commentCount)
   const [showCommentInput, setShowCommentInput] = useState(false)
@@ -100,7 +98,6 @@ export default function ArticleReader({
 
     const fetchFullContent = async () => {
       try {
-        // Method 1: API route with cheerio scraper
         const response = await fetch(`/api/article-content?url=${encodeURIComponent(article.url)}`)
         if (response.ok) {
           const data = await response.json()
@@ -112,7 +109,6 @@ export default function ArticleReader({
           }
         }
 
-        // Method 2: RSS content field (often has real paragraphs)
         if (article.content && article.content.length > 100) {
           const cleaned = stripHtml(article.content)
           if (cleaned.length > 100) {
@@ -122,7 +118,6 @@ export default function ArticleReader({
           }
         }
 
-        // Method 3: Description fallback
         if (article.description) {
           const cleaned = stripHtml(article.description)
           if (cleaned.length > 30) {
@@ -136,7 +131,6 @@ export default function ArticleReader({
           }
         }
 
-        // Method 4: honest failure — don't fabricate content
         setFullContent('')
 
       } catch (error) {
@@ -149,7 +143,7 @@ export default function ArticleReader({
     }
 
     fetchFullContent()
-  }, [article.url]) // only url — that's what identifies a new article
+  }, [article.url])
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -170,7 +164,6 @@ export default function ArticleReader({
     }
   }
 
-  // Fix 1: always strip HTML before rendering, split into paragraphs
   const formatContent = (content: string) => {
     if (!content) return null
     const clean = content.includes('<') ? stripHtml(content) : content
@@ -231,28 +224,28 @@ export default function ArticleReader({
                 >
                   {copied ? <Check className="h-5 w-5 text-green-500" /> : <Share2 className="h-5 w-5" />}
                 </button>
-                
-{showShareMenu && (
-  <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-20 animate-fade-in">
-    <button
-      onClick={handleShare}
-      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-    >
-      <Share2 className="h-4 w-4" /> Copy link
-    </button>
-    
-     href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(article.url)}&text=${encodeURIComponent(article.title)}`}
-target="_blank"
-rel="noopener noreferrer"
-className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
->
-<svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-</svg>
-Share on X
-</a>
-  </div>
-)}              </div>
+                {showShareMenu && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-20 animate-fade-in">
+                    <button
+                      onClick={handleShare}
+                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <Share2 className="h-4 w-4" /> Copy link
+                    </button>
+                    <a
+                      href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(article.url)}&text=${encodeURIComponent(article.title)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231z" />
+                      </svg>
+                      Share on X
+                    </a>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -364,7 +357,7 @@ Share on X
                 <p className="text-sm text-gray-400 mt-2 mb-4">
                   This site may block previews or require a subscription.
                 </p>
-                
+                <a
                   href={article.url}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -383,7 +376,7 @@ Share on X
         {/* Source link */}
         {fullContent && (
           <div className="mt-8 text-center">
-            
+            <a
               href={article.url}
               target="_blank"
               rel="noopener noreferrer"
