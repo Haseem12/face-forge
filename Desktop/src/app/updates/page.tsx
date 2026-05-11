@@ -1,118 +1,191 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Flame, Sparkles, UserPlus, MessageCircle, Heart, Zap, Clock, Star, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { createClient } from '@/lib/supabase/client'
+import { 
+  Bell, Sparkles, GitBranch, Users, TrendingUp, 
+  Megaphone, CheckCircle, AlertCircle, ArrowRight,
+  Play, Eye, Heart, MessageCircle, Share2, Plus,
+  Crown, Flame, Zap, Clock
+} from 'lucide-react'
 import { timeAgo } from '@/lib/dashboard/helpers'
+import { createClient } from '@/lib/supabase/client'
 
-interface Update {
+interface UpdateItem {
   id: string
-  type: 'forge_created' | 'forge_updated' | 'comment' | 'like' | 'follow' | 'achievement' | 'trending'
-  user: {
+  type: 'story' | 'channel_post' | 'announcement' | 'sponsored' | 'trending'
+  title: string
+  message: string
+  created_at: string
+  read: boolean
+  image?: string
+  author?: {
     id: string
     name: string
     username: string
-    avatar: string | null
+    avatar?: string
+    isVerified?: boolean
   }
-  target?: {
-    id: string
-    title: string
-    type: 'forge' | 'news'
-  }
-  message: string
-  created_at: string
-  metadata?: any
+  actionLink?: string
+  actionText?: string
+  views?: number
+  likes?: number
+  comments?: number
 }
 
 export default function UpdatesTab() {
-  const [updates, setUpdates] = useState<Update[]>([])
+  const [updates, setUpdates] = useState<UpdateItem[]>([])
+  const [stories, setStories] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'forges' | 'social' | 'achievements'>('all')
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'channels' | 'trending'>('all')
   const supabase = createClient()
 
   useEffect(() => {
     fetchUpdates()
+    fetchStories()
   }, [])
 
   const fetchUpdates = async () => {
     setLoading(true)
     try {
-      // Fetch notifications from your API
-      const response = await fetch('/api/notifications?limit=50')
+      // Fetch from your API
+      const response = await fetch('/api/updates')
       const data = await response.json()
-      setUpdates(data.notifications || [])
+      setUpdates(data.updates || mockUpdates)
     } catch (error) {
       console.error('Failed to fetch updates:', error)
+      setUpdates(mockUpdates)
     } finally {
       setLoading(false)
     }
   }
 
-  const getUpdateIcon = (type: Update['type']) => {
-    switch (type) {
-      case 'forge_created':
-        return <Sparkles className="h-4 w-4 text-purple-500" />
-      case 'forge_updated':
-        return <Zap className="h-4 w-4 text-orange-500" />
-      case 'comment':
-        return <MessageCircle className="h-4 w-4 text-blue-500" />
-      case 'like':
-        return <Heart className="h-4 w-4 text-red-500" />
-      case 'follow':
-        return <UserPlus className="h-4 w-4 text-green-500" />
-      case 'achievement':
-        return <Star className="h-4 w-4 text-yellow-500" />
-      case 'trending':
-        return <TrendingUp className="h-4 w-4 text-pink-500" />
-      default:
-        return <Flame className="h-4 w-4 text-orange-500" />
+  const fetchStories = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data } = await supabase
+        .from('stories')
+        .select('id, user_id, media_url, created_at, profiles!user_id(display_name, username, avatar_url)')
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      setStories(data || [])
+    } catch (error) {
+      console.error('Failed to fetch stories:', error)
     }
   }
 
-  const getUpdateBackground = (type: Update['type']) => {
+  const getUpdateIcon = (type: UpdateItem['type']) => {
     switch (type) {
-      case 'forge_created':
-        return 'bg-purple-50 border-purple-100'
-      case 'forge_updated':
-        return 'bg-orange-50 border-orange-100'
-      case 'comment':
-        return 'bg-blue-50 border-blue-100'
-      case 'like':
-        return 'bg-red-50 border-red-100'
-      case 'follow':
-        return 'bg-green-50 border-green-100'
-      case 'achievement':
-        return 'bg-yellow-50 border-yellow-100'
+      case 'story':
+        return <Play className="h-4 w-4 text-purple-500" />
+      case 'channel_post':
+        return <Megaphone className="h-4 w-4 text-orange-500" />
+      case 'announcement':
+        return <Bell className="h-4 w-4 text-blue-500" />
+      case 'sponsored':
+        return <Crown className="h-4 w-4 text-yellow-500" />
+      case 'trending':
+        return <Flame className="h-4 w-4 text-red-500" />
       default:
-        return 'bg-gray-50 border-gray-100'
+        return <Sparkles className="h-4 w-4 text-gray-500" />
     }
   }
+
+  const getUpdateBg = (type: UpdateItem['type']) => {
+    switch (type) {
+      case 'channel_post':
+        return 'bg-orange-50 border-orange-100'
+      case 'announcement':
+        return 'bg-blue-50 border-blue-100'
+      case 'sponsored':
+        return 'bg-yellow-50 border-yellow-100'
+      case 'trending':
+        return 'bg-red-50 border-red-100'
+      default:
+        return 'bg-white border-gray-100'
+    }
+  }
+
+  const unreadCount = updates.filter(u => !u.read).length
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6">
+    <div className="max-w-2xl mx-auto px-4 py-6 pb-20">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-black text-gray-900">Updates</h1>
-        <p className="text-sm text-gray-500">What's happening in your network</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-black text-gray-900">Updates</h1>
+          <p className="text-sm text-gray-500">Stories, channels, and trending content</p>
+        </div>
+        {unreadCount > 0 && (
+          <span className="px-2 py-1 text-xs font-bold text-white bg-orange-500 rounded-full">
+            {unreadCount} new
+          </span>
+        )}
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-2 mb-6 overflow-x-auto scrollbar-hide">
+      {/* Stories Row - Like WhatsApp Status */}
+      <div className="mb-6 overflow-x-auto scrollbar-hide">
+        <div className="flex gap-3 pb-2">
+          {/* Your Story Button */}
+          <Link href="/stories/create">
+            <div className="flex flex-col items-center gap-1 flex-shrink-0">
+              <div className="w-16 h-16 rounded-full border-2 border-dashed border-orange-300 bg-orange-50 flex items-center justify-center cursor-pointer hover:border-orange-400 transition">
+                <Plus className="h-5 w-5 text-orange-500" />
+              </div>
+              <span className="text-[10px] text-gray-500 font-medium">Your story</span>
+            </div>
+          </Link>
+
+          {/* Friend Stories */}
+          {stories.map((story) => (
+            <button key={story.id} className="flex flex-col items-center gap-1 flex-shrink-0 group">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-full ring-2 ring-gradient-to-r from-orange-500 to-purple-600 p-0.5">
+                  <div className="w-full h-full rounded-full overflow-hidden bg-gray-100">
+                    {story.profiles?.avatar_url ? (
+                      <Image
+                        src={story.profiles.avatar_url}
+                        alt={story.profiles.display_name}
+                        width={64}
+                        height={64}
+                        className="object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-orange-400 to-purple-600 flex items-center justify-center text-white font-bold text-xl">
+                        {story.profiles?.display_name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
+              </div>
+              <span className="text-[10px] text-gray-500 font-medium max-w-[60px] truncate">
+                {story.profiles?.display_name?.split(' ')[0] || 'User'}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Filter Tabs - Like WhatsApp Channel filters */}
+      <div className="flex gap-2 mb-6 border-b border-gray-100">
         {[
-          { id: 'all', label: 'All', icon: Flame },
-          { id: 'forges', label: 'Forges', icon: Sparkles },
-          { id: 'social', label: 'Social', icon: MessageCircle },
-          { id: 'achievements', label: 'Achievements', icon: Star }
+          { id: 'all', label: 'All Updates', icon: Sparkles },
+          { id: 'channels', label: 'Channels', icon: Megaphone },
+          { id: 'trending', label: 'Trending', icon: Flame }
         ].map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setFilter(tab.id as any)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition ${
-              filter === tab.id
-                ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-md'
-                : 'bg-white border border-gray-200 text-gray-600 hover:border-orange-300'
+            onClick={() => setSelectedFilter(tab.id as any)}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition border-b-2 ${
+              selectedFilter === tab.id
+                ? 'border-orange-500 text-orange-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
             <tab.icon className="h-4 w-4" />
@@ -123,141 +196,226 @@ export default function UpdatesTab() {
 
       {/* Updates Feed */}
       {loading ? (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {[1, 2, 3, 4].map(i => (
             <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse">
               <div className="flex gap-3">
-                <div className="w-10 h-10 rounded-full bg-gray-200" />
+                <div className="w-12 h-12 rounded-full bg-gray-200" />
                 <div className="flex-1">
-                  <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-                  <div className="h-3 bg-gray-200 rounded w-1/2" />
+                  <div className="h-4 bg-gray-200 rounded w-32 mb-2" />
+                  <div className="h-3 bg-gray-200 rounded w-48" />
                 </div>
               </div>
             </div>
           ))}
         </div>
-      ) : updates.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center mx-auto mb-4">
-            <Flame className="h-10 w-10 text-gray-400" />
-          </div>
-          <h3 className="text-lg font-bold text-gray-900 mb-2">No updates yet</h3>
-          <p className="text-gray-500 text-sm max-w-sm mx-auto">
-            When people interact with your content or create new forges, you'll see it here
-          </p>
+      ) : updates.filter(u => 
+        selectedFilter === 'all' || 
+        (selectedFilter === 'channels' && ['channel_post', 'announcement'].includes(u.type)) ||
+        (selectedFilter === 'trending' && u.type === 'trending')
+      ).length === 0 ? (
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
+          <Bell className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+          <h3 className="font-bold text-gray-900 mb-1">No updates yet</h3>
+          <p className="text-sm text-gray-500">Follow channels to see updates here</p>
+          <Link href="/discover">
+            <button className="mt-4 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white text-sm font-medium rounded-full">
+              Discover channels
+            </button>
+          </Link>
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Sponsored/Ad Section - Like WhatsApp Ads */}
+          <div className="mb-2">
+            <div className="flex items-center gap-2 mb-2">
+              <Crown className="h-3 w-3 text-yellow-500" />
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Sponsored</span>
+            </div>
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 p-4">
+              <div className="flex gap-3">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-500 to-purple-600 flex items-center justify-center">
+                  <Crown className="h-6 w-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-bold text-gray-900">Build Better Forges</h3>
+                  <p className="text-sm text-gray-600 mt-0.5">Learn advanced techniques from top creators</p>
+                  <button className="mt-2 text-xs font-semibold text-orange-600 hover:text-orange-700">
+                    Learn more →
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Regular Updates */}
           {updates
-            .filter(u => filter === 'all' || 
-              (filter === 'forges' && ['forge_created', 'forge_updated'].includes(u.type)) ||
-              (filter === 'social' && ['comment', 'like', 'follow'].includes(u.type)) ||
-              (filter === 'achievements' && u.type === 'achievement'))
+            .filter(u => 
+              selectedFilter === 'all' || 
+              (selectedFilter === 'channels' && ['channel_post', 'announcement'].includes(u.type)) ||
+              (selectedFilter === 'trending' && u.type === 'trending')
+            )
             .map((update) => (
               <div
                 key={update.id}
-                className={`rounded-xl border p-4 transition hover:shadow-md ${getUpdateBackground(update.type)}`}
+                className={`rounded-xl border p-4 transition hover:shadow-md ${getUpdateBg(update.type)} ${!update.read ? 'ring-1 ring-orange-200' : ''}`}
               >
                 <div className="flex gap-3">
-                  {/* Avatar */}
-                  <Link href={`/profile/${update.user.username}`}>
-                    <div className="flex-shrink-0">
-                      {update.user.avatar ? (
-                        <Image
-                          src={update.user.avatar}
-                          alt={update.user.name}
-                          width={40}
-                          height={40}
-                          className="rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
-                          {update.user.name[0].toUpperCase()}
-                        </div>
-                      )}
-                    </div>
-                  </Link>
+                  {/* Author Avatar */}
+                  {update.author && (
+                    <Link href={`/profile/${update.author.username}`}>
+                      <div className="flex-shrink-0">
+                        {update.author.avatar ? (
+                          <Image
+                            src={update.author.avatar}
+                            alt={update.author.name}
+                            width={44}
+                            height={44}
+                            className="rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-11 h-11 rounded-full bg-gradient-to-br from-orange-400 to-purple-600 flex items-center justify-center text-white font-bold">
+                            {update.author.name[0].toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                    </Link>
+                  )}
 
-                  {/* Content */}
                   <div className="flex-1">
                     <div className="flex items-start justify-between">
                       <div>
-                        <Link href={`/profile/${update.user.username}`}>
-                          <span className="font-bold text-gray-900 hover:text-orange-600 transition">
-                            {update.user.name}
-                          </span>
-                        </Link>
-                        <span className="text-gray-600 text-sm ml-1">{update.message}</span>
+                        {update.author && (
+                          <div className="flex items-center gap-2">
+                            <Link href={`/profile/${update.author.username}`}>
+                              <span className="font-bold text-gray-900 hover:text-orange-600 transition">
+                                {update.author.name}
+                              </span>
+                            </Link>
+                            {update.author.isVerified && (
+                              <CheckCircle className="h-3.5 w-3.5 text-blue-500" />
+                            )}
+                            <span className="text-xs text-gray-400">· {timeAgo(update.created_at)}</span>
+                          </div>
+                        )}
+                        <h3 className="font-semibold text-gray-900 mt-1">{update.title}</h3>
+                        <p className="text-sm text-gray-600 mt-0.5">{update.message}</p>
                       </div>
                       <div className="flex-shrink-0 ml-2">
                         {getUpdateIcon(update.type)}
                       </div>
                     </div>
-
-                    {update.target && (
-                      <Link href={`/spark/${update.target.id}`}>
-                        <div className="mt-2 p-3 bg-white/50 rounded-lg border border-gray-100 hover:border-orange-200 transition cursor-pointer">
-                          <p className="text-sm font-medium text-gray-800">
-                            {update.target.title}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {update.target.type === 'forge' ? 'Forge' : 'Article'}
-                          </p>
-                        </div>
-                      </Link>
+                    
+                    {/* Engagement stats */}
+                    {(update.views || update.likes || update.comments) && (
+                      <div className="flex items-center gap-4 mt-3 text-xs text-gray-400">
+                        {update.views && (
+                          <span className="flex items-center gap-1">
+                            <Eye className="h-3 w-3" /> {update.views.toLocaleString()}
+                          </span>
+                        )}
+                        {update.likes && (
+                          <span className="flex items-center gap-1">
+                            <Heart className="h-3 w-3" /> {update.likes.toLocaleString()}
+                          </span>
+                        )}
+                        {update.comments && (
+                          <span className="flex items-center gap-1">
+                            <MessageCircle className="h-3 w-3" /> {update.comments.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
                     )}
 
-                    <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
-                      <span>{timeAgo(update.created_at)}</span>
-                      {update.type === 'forge_created' && (
-                        <span className="flex items-center gap-1">
-                          <Sparkles className="h-3 w-3" />
-                          New
-                        </span>
-                      )}
-                    </div>
+                    {/* Action button */}
+                    {update.actionLink && (
+                      <div className="mt-3">
+                        <Link href={update.actionLink}>
+                          <button className="text-xs font-medium text-orange-500 hover:text-orange-600 flex items-center gap-1">
+                            {update.actionText || 'View update'}
+                            <ArrowRight className="h-3 w-3" />
+                          </button>
+                        </Link>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             ))}
         </div>
       )}
-
-      {/* Weekly Digest Section */}
-      {!loading && updates.length > 0 && (
-        <div className="mt-8 p-4 bg-gradient-to-r from-orange-50 to-purple-50 rounded-xl border border-orange-100">
-          <div className="flex items-center gap-2 mb-3">
-            <Clock className="h-4 w-4 text-orange-500" />
-            <h3 className="font-bold text-gray-900 text-sm">This Week's Digest</h3>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="text-center">
-              <div className="text-2xl font-black text-transparent bg-gradient-to-r from-orange-500 to-purple-600 bg-clip-text">
-                {updates.filter(u => u.type === 'like').length}
-              </div>
-              <p className="text-xs text-gray-600">Likes received</p>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-black text-transparent bg-gradient-to-r from-orange-500 to-purple-600 bg-clip-text">
-                {updates.filter(u => u.type === 'comment').length}
-              </div>
-              <p className="text-xs text-gray-600">Comments</p>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-black text-transparent bg-gradient-to-r from-orange-500 to-purple-600 bg-clip-text">
-                {updates.filter(u => u.type === 'follow').length}
-              </div>
-              <p className="text-xs text-gray-600">New allies</p>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-black text-transparent bg-gradient-to-r from-orange-500 to-purple-600 bg-clip-text">
-                {updates.filter(u => u.type === 'forge_created').length}
-              </div>
-              <p className="text-xs text-gray-600">New forges</p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
+
+// Mock data
+const mockUpdates: UpdateItem[] = [
+  {
+    id: '1',
+    type: 'channel_post',
+    title: 'New video: Advanced Forge Techniques',
+    message: 'Learn how to optimize your forges for better performance',
+    created_at: new Date().toISOString(),
+    read: false,
+    author: {
+      id: 'channel1',
+      name: 'FaceForge Official',
+      username: 'faceforge',
+      avatar: null,
+      isVerified: true
+    },
+    actionLink: '/watch/1',
+    actionText: 'Watch now',
+    views: 1234,
+    likes: 89,
+    comments: 12
+  },
+  {
+    id: '2',
+    type: 'trending',
+    title: 'AI Art Generator is trending',
+    message: 'This forge has gained 1,000+ views in the last hour',
+    created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    read: false,
+    author: {
+      id: 'creator1',
+      name: 'Sarah Chen',
+      username: 'sarahc',
+      avatar: null,
+      isVerified: false
+    },
+    actionLink: '/spark/forge-1',
+    actionText: 'View forge',
+    views: 10456,
+    likes: 234,
+    comments: 45
+  },
+  {
+    id: '3',
+    type: 'announcement',
+    title: '📢 Platform Update',
+    message: 'New collaboration features are now available for all forges!',
+    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+    read: true,
+    actionLink: '/updates/collaboration',
+    actionText: 'Learn more'
+  },
+  {
+    id: '4',
+    type: 'channel_post',
+    title: 'Creator Spotlight: Web Design Masters',
+    message: 'Check out this amazing portfolio forge',
+    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    read: true,
+    author: {
+      id: 'channel2',
+      name: 'Design Weekly',
+      username: 'designweekly',
+      avatar: null,
+      isVerified: true
+    },
+    views: 5678,
+    likes: 123,
+    comments: 8
+  }
+]
