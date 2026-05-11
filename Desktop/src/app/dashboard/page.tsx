@@ -114,46 +114,45 @@ export default function DashboardPage() {
   }, [supabase])
 
   // ── Auto-Refresh News Every 5 Minutes ─────────────────────────────────────
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (user) {
-        refreshNews()
-      }
-    }, 5 * 60 * 1000) // 5 minutes
-    
-    return () => clearInterval(interval)
-  }, [user])
-
-  // ── Refresh on Tab Focus ──────────────────────────────────────────────────
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && user) {
-        // Refresh if last update was more than 2 minutes ago
-        if (!lastUpdated || (Date.now() - lastUpdated.getTime()) > 2 * 60 * 1000) {
-          refreshNews()
-        }
-      }
+  // Faster refresh - every 2 minutes instead of 5
+useEffect(() => {
+  const interval = setInterval(() => {
+    if (user) {
+      refreshNews()
     }
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [lastUpdated, user])
+  }, 2 * 60 * 1000) // 2 minutes - more frequent updates
+  
+  return () => clearInterval(interval)
+}, [user])
 
-  // ── Manual Refresh Handler ────────────────────────────────────────────────
-  const refreshNews = useCallback(async () => {
-    if (refreshing || !user) return
-    
-    setRefreshing(true)
-    try {
-      await loadNews(user, true)
-      setShowRefreshToast(true)
-      setTimeout(() => setShowRefreshToast(false), 3000)
-    } catch (error) {
-      console.error('Failed to refresh news:', error)
-    } finally {
-      setRefreshing(false)
+// Refresh on tab focus - immediate
+useEffect(() => {
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible' && user) {
+      // Refresh immediately when tab becomes visible
+      refreshNews()
     }
-  }, [refreshing, user, loadNews])
+  }
+  
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+}, [user])
+
+// Refresh function with better error handling
+const refreshNews = useCallback(async () => {
+  if (refreshing || !user) return
+  
+  setRefreshing(true)
+  try {
+    await loadNews(user, true)
+    setShowRefreshToast(true)
+    setTimeout(() => setShowRefreshToast(false), 2000)
+  } catch (error) {
+    console.error('Failed to refresh news:', error)
+  } finally {
+    setRefreshing(false)
+  }
+}, [refreshing, user, loadNews])
 
   // ── Update displayed news when newsItems change (for infinite scroll) ─────
   useEffect(() => {

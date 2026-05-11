@@ -1,9 +1,29 @@
-// app/api/news/route.ts
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 
-const GOOGLE_NEWS_RSS_BASE =
-  'https://news.google.com/rss/search?q=technology+AI+programming&hl=en-US&gl=US&ceid=US:en'
+// Multiple RSS feeds for real-time news coverage
+const RSS_FEEDS = [
+  // Tech & AI focused
+  'https://news.google.com/rss/search?q=technology+AI+programming+software+development&hl=en-US&gl=US&ceid=US:en',
+  'https://news.google.com/rss/search?q=tech+startups+innovation+entrepreneurship&hl=en-US&gl=US&ceid=US:en',
+  'https://news.google.com/rss/search?q=artificial+intelligence+machine+learning&hl=en-US&gl=US&ceid=US:en',
+  'https://news.google.com/rss/search?q=web+development+design+coding&hl=en-US&gl=US&ceid=US:en',
+  'https://news.google.com/rss/search?q=cybersecurity+privacy+data+protection&hl=en-US&gl=US&ceid=US:en',
+  'https://news.google.com/rss/search?q=cloud+computing+devops&hl=en-US&gl=US&ceid=US:en',
+  
+  // Major tech news sources
+  'https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml',
+  'https://feeds.feedburner.com/TechCrunch',
+  'https://www.wired.com/feed/rss',
+  'https://www.theverge.com/rss/index.xml',
+  'https://arstechnica.com/feed/',
+  'https://www.engadget.com/rss.xml',
+  'https://www.zdnet.com/news/rss.xml',
+  'https://www.cnet.com/rss/news/',
+  'https://techcrunch.com/feed/',
+  'https://www.theverge.com/rss/full.xml',
+  'https://www.wired.com/category/tech/feed',
+]
 
 function extractImageFromDescription(html: string): string | undefined {
   const match = html.match(/<img[^>]+src="([^">]+)"/)
@@ -24,65 +44,30 @@ function decodeEntities(str: string): string {
     .replace(/&nbsp;/g, ' ')
 }
 
-function extractRealUrl(googleUrl: string, rawXml: string, title: string): string {
-  // Google News links are redirects – we keep the original link (opens fine)
-  return googleUrl
-}
-
-// Shuffle array (Fisher-Yates)
-function shuffleArray<T>(arr: T[]): T[] {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]]
-  }
-  return arr
-}
-export const runtime = 'nodejs'
-export async function GET(request: Request) {
+async function fetchRSSFeed(url: string, sourceName?: string): Promise<any[]> {
   try {
-    const url = new URL(request.url)
-    const bust = url.searchParams.get('bust')   // e.g. ?bust=timestamp
-
-    // 1. Build RSS URL with optional cache buster
-    let rssUrl = GOOGLE_NEWS_RSS_BASE
-    if (bust) {
-      // Append a random query param to bypass Google's CDN cache
-      rssUrl += `&_cb=${Date.now()}&_rand=${Math.random()}`
-    }
-
-    // 2. Fetch RSS with appropriate cache settings
-    const fetchOptions: RequestInit = {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 second timeout
+    
+    const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; NewsReader/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; NewsReader/2.0)',
         Accept: 'application/rss+xml, application/xml, text/xml',
       },
-    }
+      signal: controller.signal,
+      next: { revalidate: 60 } // Revalidate every minute
+    })
+    
+    clearTimeout(timeoutId)
 
-    if (bust) {
-      // Force fresh fetch, no Next.js data cache
-      fetchOptions.cache = 'no-store'
-    } else {
-      // Normal mode: cache for 5 minutes
-      fetchOptions.next = { revalidate: 300 }
-    }
-
-    const res = await fetch(rssUrl, fetchOptions)
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: `RSS fetch failed: ${res.status}` },
-        { status: 502 }
-      )
-    }
-
+    if (!res.ok) return []
     const xml = await res.text()
+    const articles: any[] = []
 
-    // Parse <item> blocks
     const itemRegex = /<item>([\s\S]*?)<\/item>/g
-    let articles: any[] = []
     let match
 
-    while ((match = itemRegex.exec(xml)) !== null && articles.length < 20) {
+    while ((match = itemRegex.exec(xml)) !== null && articles.length < 15) {
       const item = match[1]
 
       const titleMatch = item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) ||
@@ -97,20 +82,40 @@ export async function GET(request: Request) {
       if (!titleMatch || !linkMatch) continue
 
       const rawTitle = decodeEntities(titleMatch[1].trim())
+      // Clean title from source suffix
       const titleParts = rawTitle.split(' - ')
-      const sourceName =
-        sourceMatch ? decodeEntities(sourceMatch[1].trim()) :
-        titleParts.length > 1 ? titleParts[titleParts.length - 1] : 'Google News'
-      const cleanTitle = titleParts.length > 1
-        ? titleParts.slice(0, -1).join(' - ')
+      const cleanTitle = titleParts.length > 1 
+        ? titleParts.slice(0, -1).join(' - ') 
         : rawTitle
+      
+      // Determine source name
+      let finalSourceName = sourceName || 'Tech News'
+      if (sourceMatch) {
+        finalSourceName = decodeEntities(sourceMatch[1].trim())
+      } else if (titleParts.length > 1 && !sourceName) {
+        finalSourceName = titleParts[titleParts.length - 1]
+      } else if (url.includes('techcrunch')) {
+        finalSourceName = 'TechCrunch'
+      } else if (url.includes('wired')) {
+        finalSourceName = 'Wired'
+      } else if (url.includes('theverge')) {
+        finalSourceName = 'The Verge'
+      } else if (url.includes('nytimes')) {
+        finalSourceName = 'NY Times'
+      }
 
       const descRaw = descMatch?.[1] || ''
       const urlToImage = extractImageFromDescription(descRaw)
-      const description = stripHtml(decodeEntities(descRaw)).slice(0, 200)
+      const description = stripHtml(decodeEntities(descRaw)).slice(0, 300)
 
       const articleUrl = linkMatch[1].trim()
-      const id = crypto.createHash('md5').update(articleUrl).digest('hex')
+      const id = crypto.createHash('md5').update(articleUrl + Date.now()).digest('hex')
+
+      let pubDate = new Date()
+      if (pubDateMatch) {
+        const parsed = new Date(pubDateMatch[1].trim())
+        if (!isNaN(parsed.getTime())) pubDate = parsed
+      }
 
       articles.push({
         id,
@@ -118,36 +123,92 @@ export async function GET(request: Request) {
         description,
         url: articleUrl,
         urlToImage: urlToImage || null,
-        source: { name: sourceName },
-        publishedAt: pubDateMatch
-          ? new Date(pubDateMatch[1].trim()).toISOString()
-          : new Date().toISOString(),
+        source: { name: finalSourceName },
+        publishedAt: pubDate.toISOString(),
       })
     }
+    return articles
+  } catch (error) {
+    console.error(`Failed to fetch ${url}:`, error)
+    return []
+  }
+}
 
-    // 3. If bust is present, shuffle the articles to feel "new" even if RSS order is same
-    if (bust && articles.length > 0) {
+// Shuffle array for variety
+function shuffleArray<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
+
+export const runtime = 'nodejs'
+export const maxDuration = 30 // Extended timeout for multiple feeds
+
+export async function GET(request: Request) {
+  const startTime = Date.now()
+  
+  try {
+    const url = new URL(request.url)
+    const refresh = url.searchParams.get('refresh') === 'true'
+    const limit = parseInt(url.searchParams.get('limit') || '100')
+    
+    // Fetch from multiple sources in parallel
+    console.log('[News API] Fetching from', RSS_FEEDS.length, 'sources...')
+    
+    const feedPromises = RSS_FEEDS.map(feed => fetchRSSFeed(feed))
+    const feedResults = await Promise.allSettled(feedPromises)
+    
+    // Collect all successful articles
+    let allArticles: any[] = []
+    for (const result of feedResults) {
+      if (result.status === 'fulfilled') {
+        allArticles.push(...result.value)
+      }
+    }
+    
+    // Deduplicate by URL (keep the first occurrence)
+    const uniqueArticles = new Map()
+    for (const article of allArticles) {
+      if (!uniqueArticles.has(article.url)) {
+        uniqueArticles.set(article.url, article)
+      }
+    }
+    
+    // Sort by date (newest first)
+    let articles = Array.from(uniqueArticles.values())
+      .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+      .slice(0, limit)
+    
+    // Shuffle if refresh requested (fresh feel)
+    if (refresh && articles.length > 0) {
       articles = shuffleArray(articles)
     }
-
-    // 4. Set response headers: force no caching when bust is used
-    const responseHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
-    if (bust) {
-      responseHeaders['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
-    } else {
-      responseHeaders['Cache-Control'] = 'public, s-maxage=900, stale-while-revalidate=1800'
-    }
-
+    
+    const duration = Date.now() - startTime
+    console.log(`[News API] Fetched ${articles.length} unique articles from ${RSS_FEEDS.length} sources in ${duration}ms`)
+    
     return NextResponse.json(
-      { articles, count: articles.length },
-      { headers: responseHeaders }
+      { 
+        articles, 
+        count: articles.length,
+        sources: RSS_FEEDS.length,
+        lastUpdated: new Date().toISOString(),
+        duration: `${duration}ms`
+      },
+      {
+        headers: {
+          'Cache-Control': refresh 
+            ? 'no-cache, no-store, must-revalidate, max-age=0'
+            : 'public, s-maxage=120, stale-while-revalidate=300', // Cache 2 minutes
+        },
+      }
     )
   } catch (err: any) {
-    console.error('[/api/news] Error:', err)
+    console.error('[News API] Error:', err)
     return NextResponse.json(
-      { error: err.message || 'Failed to fetch news' },
+      { error: err.message || 'Failed to fetch news', articles: [] },
       { status: 500 }
     )
   }
