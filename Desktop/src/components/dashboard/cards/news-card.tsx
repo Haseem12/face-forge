@@ -89,7 +89,7 @@ export default function MainNewsCard({
   }
 
   return (
-    <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden transition-all duration-200 hover:shadow-md w-full group">
+<article className="bg-white rounded-md border border-gray-100 overflow-hidden transition-all duration-200 hover:shadow-md w-full group">
       {/* Top Section: Large Image */}
       <div className="relative w-full h-48 xs:h-52 sm:h-56 bg-gray-50">
         {imageLoading ? (
