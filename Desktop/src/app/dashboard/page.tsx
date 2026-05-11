@@ -317,18 +317,18 @@ export default function DashboardPage() {
 
                 <div className="space-y-4">
                   {visibleNews.map((article, idx) => (
-                    <NewsCard
-                      key={article.id}
-                      article={article}
-                      isLiked={likedNews.has(article.id)}
-                      commentCount={newsCC[article.id] || 0}
-                      shareCopied={shareCopied === article.id}
-                      onLike={() => handleNewsLike(article.id)}
-                      onComment={() => setCommentPanel({ articleId: article.id })}
-                      onShare={() => handleShare(article.url, article.id)}
-                      onReadInside={() => handleReadInside(article, idx)}
-                    />
-                  ))}
+  <NewsCard
+    key={article.id}
+    article={article}
+    isLiked={likedNews.has(article.id)}
+    commentCount={newsCC[article.id] || 0}
+    shareCopied={shareCopied === article.id}
+    onLike={() => handleNewsLike(article.id)}
+    onComment={() => setCommentPanel({ articleId: article.id })}
+    onShare={() => handleShare(article.url, article.id)}
+    onReadInside={() => handleReadInside(article, idx)}
+  />
+))}
                   
                   {/* Loading indicator for infinite scroll */}
                   {!showAllNews && hasMoreNews && !newsLoading && newsItems.length > 0 && (
@@ -406,17 +406,21 @@ export default function DashboardPage() {
         <StoryViewer userId={viewingStoryUserId} onClose={() => setViewingStoryUserId(null)} />
       )}
 
-      {/* Article Reader Modal */}
-      {selectedArticle && (
-        <ArticleReader
-          article={selectedArticle}
-          onClose={() => setSelectedArticle(null)}
-          onNext={handleNextArticle}
-          onPrevious={handlePreviousArticle}
-          hasNext={currentArticleIndex < currentNewsList.length - 1}
-          hasPrevious={currentArticleIndex > 0}
-        />
-      )}
+     {/* Article Reader Modal */}
+{selectedArticle && (
+  <ArticleReader
+    article={selectedArticle}
+    onClose={() => setSelectedArticle(null)}
+    onNext={handleNextArticle}
+    onPrevious={handlePreviousArticle}
+    hasNext={currentArticleIndex < currentNewsList.length - 1}
+    hasPrevious={currentArticleIndex > 0}
+    isLiked={likedNews.has(selectedArticle.id)}
+    commentCount={newsCC[selectedArticle.id] || 0}
+    onLike={() => handleNewsLike(selectedArticle.id)}
+    onComment={() => setCommentPanel({ articleId: selectedArticle.id })}
+  />
+)}
     </div>
   )
 }
