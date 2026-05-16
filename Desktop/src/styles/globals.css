@@ -123,3 +123,14 @@
     @apply bg-background text-foreground;
   }
 }
+
+
+.animate-bounce-slow {
+animation: bounce 2s ease-in-out infinite;
+}
+.animate-pulse-slow {
+ animation: pulse 3s ease-in-out infinite;
+}
+.animate-ping-slow {
+  animation: ping 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
