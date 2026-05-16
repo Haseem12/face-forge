@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { Plus, Sparkles, Users, User } from 'lucide-react'
+import { Plus, Sparkles, Users, MessageCircle, PenTool, Image as ImageIcon } from 'lucide-react'
 
 interface Action {
   href: string
@@ -11,11 +11,12 @@ interface Action {
   gradient: string
 }
 
-const actions: Action[] = [
+// Main FAB actions
+const mainActions: Action[] = [
   {
     href: '/dashboard/forges/create',
     icon: <Sparkles className="h-5 w-5" />,
-    label: 'Create',
+    label: 'Create Forge',
     gradient: 'from-pink-500 to-orange-500',
   },
   {
@@ -25,15 +26,38 @@ const actions: Action[] = [
     gradient: 'from-blue-500 to-cyan-500',
   },
   {
-    href: '/profile',
-    icon: <User className="h-5 w-5" />,
-    label: 'Profile',
+    href: '/messages',
+    icon: <MessageCircle className="h-5 w-5" />,
+    label: 'Messages',
     gradient: 'from-purple-500 to-indigo-500',
+  },
+]
+
+// Create options (sub-menu when clicking Create)
+const createOptions: Action[] = [
+  {
+    href: '/dashboard/forges/create',
+    icon: <Sparkles className="h-4 w-4" />,
+    label: 'New Forge',
+    gradient: 'from-pink-500 to-orange-500',
+  },
+  {
+    href: '/dashboard/feeds/create',
+    icon: <PenTool className="h-4 w-4" />,
+    label: 'Write Feed',
+    gradient: 'from-green-500 to-teal-500',
+  },
+  {
+    href: '/dashboard/feeds/create?type=media',
+    icon: <ImageIcon className="h-4 w-4" />,
+    label: 'Share Media',
+    gradient: 'from-blue-500 to-cyan-500',
   },
 ]
 
 export default function ThreeCurveFab() {
   const [open, setOpen] = useState(false)
+  const [showCreateMenu, setShowCreateMenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Close when clicking outside
@@ -41,6 +65,7 @@ export default function ThreeCurveFab() {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpen(false)
+        setShowCreateMenu(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -50,38 +75,58 @@ export default function ThreeCurveFab() {
   // Close on escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') {
+        setOpen(false)
+        setShowCreateMenu(false)
+      }
     }
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
   }, [])
 
+  const handleMainAction = (action: Action) => {
+    if (action.label === 'Create Forge' || action.label === 'Create') {
+      setShowCreateMenu(!showCreateMenu)
+      return
+    }
+    setOpen(false)
+  }
+
+  const actionsToShow = showCreateMenu ? createOptions : mainActions
+
   return (
     <div ref={menuRef} className="fixed bottom-20 right-6 sm:hidden z-50">
-      {/* Backdrop for closing (only when open) */}
-      {open && (
+      {/* Backdrop for closing */}
+      {(open || showCreateMenu) && (
         <div
           className="fixed inset-0 bg-black/20 backdrop-blur-sm -z-10"
-          onClick={() => setOpen(false)}
+          onClick={() => {
+            setOpen(false)
+            setShowCreateMenu(false)
+          }}
         />
       )}
 
       {/* Action buttons – fan out with spring animation */}
       <div className="relative">
         {open &&
-          actions.map((action, idx) => {
-            // Position in a 120° arc (from -60deg to +60deg) 
-           // Up-left fan: angles from 200° to 260° (sin negative = up)
-const angle = 200 + idx * 30   // 200°, 230°, 260°
-const rad = (angle * Math.PI) / 180
-const radius = 150
-const x = Math.cos(rad) * radius   // cos(200°) negative = left
-const y = Math.sin(rad) * radius   // sin(200°) negative = up
+          actionsToShow.map((action, idx) => {
+            // Fan out in an arc
+            const startAngle = showCreateMenu ? 180 : 200
+            const angle = startAngle + idx * 30
+            const rad = (angle * Math.PI) / 180
+            const radius = 140
+            const x = Math.cos(rad) * radius
+            const y = Math.sin(rad) * radius
+            
             return (
               <Link
                 key={action.href}
                 href={action.href}
-                onClick={() => setOpen(false)}
+                onClick={() => {
+                  setOpen(false)
+                  setShowCreateMenu(false)
+                }}
                 className="absolute transition-all duration-300 ease-out"
                 style={{
                   transform: `translate(${x}px, ${y}px)`,
@@ -95,7 +140,7 @@ const y = Math.sin(rad) * radius   // sin(200°) negative = up
                   >
                     {action.icon}
                   </div>
-                  <span className="text-[10px] font-semibold bg-black/70 backdrop-blur px-2 py-0.5 rounded-full text-white">
+                  <span className="text-[10px] font-semibold bg-black/70 backdrop-blur px-2 py-0.5 rounded-full text-white whitespace-nowrap">
                     {action.label}
                   </span>
                 </div>
@@ -105,7 +150,16 @@ const y = Math.sin(rad) * radius   // sin(200°) negative = up
 
         {/* Main FAB button */}
         <button
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            if (!open) {
+              setOpen(true)
+              setShowCreateMenu(false)
+            } else if (showCreateMenu) {
+              setShowCreateMenu(false)
+            } else {
+              setOpen(false)
+            }
+          }}
           className={`
             h-14 w-14 rounded-full bg-gradient-to-tr from-orange-500 to-purple-600 
             text-white shadow-2xl flex items-center justify-center 
@@ -115,6 +169,15 @@ const y = Math.sin(rad) * radius   // sin(200°) negative = up
         >
           <Plus className="h-6 w-6 transition-transform duration-200" />
         </button>
+
+        {/* Create menu indicator when Create is selected */}
+        {open && !showCreateMenu && (
+          <div className="absolute -top-12 left-1/2 -translate-x-1/2 whitespace-nowrap">
+            <div className="bg-black/70 backdrop-blur text-white text-[10px] font-semibold px-2 py-1 rounded-full">
+              Tap Create for options
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
