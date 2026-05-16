@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -43,7 +43,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   lifestyle: 'bg-rose-50 text-rose-600',
 }
 
-export default function FeedsPage() {
+// Separate component that uses useSearchParams
+function FeedsContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = createClient()
@@ -53,7 +54,7 @@ export default function FeedsPage() {
   const [showSuccess, setShowSuccess] = useState(false)
 
   useEffect(() => {
-    if (searchParams.get('success') === 'true') {
+    if (searchParams?.get('success') === 'true') {
       setShowSuccess(true)
       setTimeout(() => setShowSuccess(false), 3000)
       router.replace('/dashboard/feeds')
@@ -168,6 +169,7 @@ export default function FeedsPage() {
               {post.media_url && (
                 <div className="mb-3 rounded-xl overflow-hidden bg-gray-100">
                   {post.media_type === 'image' ? (
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={post.media_url} alt="" className="w-full max-h-96 object-contain" />
                   ) : (
                     <video src={post.media_url} className="w-full max-h-96 object-contain" controls />
@@ -233,5 +235,26 @@ export default function FeedsPage() {
         .animate-slide-down { animation: slide-down 0.3s ease-out; }
       `}</style>
     </div>
+  )
+}
+
+// Loading fallback
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-gray-500">Loading feeds...</p>
+      </div>
+    </div>
+  )
+}
+
+// Main export with Suspense boundary
+export default function FeedsPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <FeedsContent />
+    </Suspense>
   )
 }
