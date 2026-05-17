@@ -1,16 +1,14 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
 import { 
   X, Image as ImageIcon, Video, Send, Loader2, 
   MapPin, Smile, AtSign, Heart, ThumbsUp, 
   Frown, Meh, Zap, Coffee, PartyPopper, 
-  Trash2, Sparkles, XCircle
+  Trash2, Sparkles, XCircle, CheckCircle
 } from 'lucide-react'
 
-// Emotions/Feelings options
 const FEELINGS = [
   { emoji: '😊', label: 'Happy', icon: Smile, color: 'text-yellow-500' },
   { emoji: '❤️', label: 'Loving', icon: Heart, color: 'text-red-500' },
@@ -22,11 +20,7 @@ const FEELINGS = [
   { emoji: '🎉', label: 'Celebrating', icon: PartyPopper, color: 'text-purple-500' },
 ]
 
-// Mention suggestions (fetch from your database in production)
-const MENTION_SUGGESTIONS = [
-  { username: 'johndoe', name: 'John Doe', avatar: '' },
-  { username: 'janedoe', name: 'Jane Doe', avatar: '' },
-]
+type PostStatus = 'idle' | 'uploading' | 'success' | 'error'
 
 interface CreatePostModalProps {
   isOpen: boolean
@@ -43,29 +37,16 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
   const [mediaFile, setMediaFile] = useState<File | null>(null)
   const [mediaPreview, setMediaPreview] = useState<string | null>(null)
   const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [showMentions, setShowMentions] = useState(false)
-  const [mentionQuery, setMentionQuery] = useState('')
-  const [cursorPosition, setCursorPosition] = useState(0)
+  const [postStatus, setPostStatus] = useState<PostStatus>('idle')
+  const [statusMessage, setStatusMessage] = useState('')
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [showFeelingPicker, setShowFeelingPicker] = useState(false)
+  const [showSuccessToast, setShowSuccessToast] = useState(false)
   
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const modalRef = useRef<HTMLDivElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
 
-  // Close modal on escape key
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleEscape)
-    return () => document.removeEventListener('keydown', handleEscape)
-  }, [isOpen, onClose])
-
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current && isOpen) {
       textareaRef.current.style.height = 'auto'
@@ -73,7 +54,6 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
     }
   }, [content, isOpen])
 
-  // Reset form when modal closes
   useEffect(() => {
     if (!isOpen) {
       resetForm()
@@ -87,41 +67,10 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
     if (mediaPreview) URL.revokeObjectURL(mediaPreview)
     setMediaPreview(null)
     setMediaType(null)
-    setError(null)
-    setShowMentions(false)
+    setPostStatus('idle')
+    setStatusMessage('')
+    setUploadProgress(0)
     setShowFeelingPicker(false)
-  }
-
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value
-    setContent(value)
-    
-    // Check for @mention
-    const cursorPos = e.target.selectionStart
-    const textBeforeCursor = value.slice(0, cursorPos)
-    const lastAtIndex = textBeforeCursor.lastIndexOf('@')
-    
-    if (lastAtIndex !== -1) {
-      const query = textBeforeCursor.slice(lastAtIndex + 1)
-      if (!query.includes(' ') && query.length > 0) {
-        setMentionQuery(query)
-        setShowMentions(true)
-        setCursorPosition(cursorPos)
-        return
-      }
-    }
-    setShowMentions(false)
-  }
-
-  const insertMention = (username: string) => {
-    const textBeforeCursor = content.slice(0, cursorPosition)
-    const textAfterCursor = content.slice(cursorPosition)
-    const lastAtIndex = textBeforeCursor.lastIndexOf('@')
-    const newText = textBeforeCursor.slice(0, lastAtIndex) + `@${username} ` + textAfterCursor
-    setContent(newText)
-    setShowMentions(false)
-    setMentionQuery('')
-    setTimeout(() => textareaRef.current?.focus(), 0)
   }
 
   const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video') => {
@@ -132,19 +81,22 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
     const isValidVideo = type === 'video' && file.type.startsWith('video/')
     
     if (!isValidImage && !isValidVideo) {
-      setError(`Please select a valid ${type} file`)
+      setStatusMessage(`Please select a valid ${type} file`)
+      setPostStatus('error')
+      setTimeout(() => setPostStatus('idle'), 3000)
       return
     }
 
     if (file.size > 50 * 1024 * 1024) {
-      setError('File size must be less than 50MB')
+      setStatusMessage('File size must be less than 50MB')
+      setPostStatus('error')
+      setTimeout(() => setPostStatus('idle'), 3000)
       return
     }
 
     setMediaFile(file)
     setMediaType(type)
     setMediaPreview(URL.createObjectURL(file))
-    setError(null)
   }
 
   const removeMedia = () => {
@@ -153,46 +105,65 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
     setMediaPreview(null)
     setMediaType(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
+    if (videoInputRef.current) videoInputRef.current.value = ''
   }
 
   const uploadMedia = async (): Promise<string | null> => {
     if (!mediaFile || !userId) return null
     
+    const timestamp = Date.now()
+    const randomString = Math.random().toString(36).substring(2, 8)
     const fileExt = mediaFile.name.split('.').pop()
-    const fileName = `${userId}/${Date.now()}.${fileExt}`
+    const fileName = `${userId}/${timestamp}_${randomString}.${fileExt}`
     const filePath = `feeds/${fileName}`
     
-    const { error: uploadError } = await supabase.storage
-      .from('feed-media')
-      .upload(filePath, mediaFile)
-    
-    if (uploadError) {
-      console.error('Upload error:', uploadError)
-      setError('Failed to upload media. Please try again.')
-      return null
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from('feed-media')
+        .upload(filePath, mediaFile, {
+          cacheControl: '3600',
+          upsert: false
+        })
+      
+      if (uploadError) throw new Error(uploadError.message)
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from('feed-media')
+        .getPublicUrl(filePath)
+      
+      return publicUrl
+      
+    } catch (err) {
+      console.error('Upload error:', err)
+      throw err
     }
-    
-    const { data: { publicUrl } } = supabase.storage
-      .from('feed-media')
-      .getPublicUrl(filePath)
-    
-    return publicUrl
   }
 
   const handleSubmit = async () => {
     if (!content.trim() && !mediaFile) {
-      setError('Please write something or add media')
+      setStatusMessage('Please write something or add media')
+      setPostStatus('error')
+      setTimeout(() => setPostStatus('idle'), 3000)
       return
     }
     
-    setIsSubmitting(true)
-    setError(null)
+    // Start uploading
+    setPostStatus('uploading')
+    setStatusMessage('Preparing your post...')
+    setUploadProgress(10)
     
     try {
       let mediaUrl = null
       if (mediaFile) {
+        setStatusMessage('Uploading media...')
+        setUploadProgress(30)
         mediaUrl = await uploadMedia()
+        setUploadProgress(70)
+        if (!mediaUrl) throw new Error('Failed to upload media')
       }
+      
+      setStatusMessage('Creating your post...')
+      setUploadProgress(85)
       
       // Build post content with feeling if selected
       let finalContent = content
@@ -212,28 +183,51 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
           created_at: new Date().toISOString(),
         })
       
-      if (insertError) throw insertError
+      if (insertError) throw new Error(insertError.message)
       
-      onPostCreated()
-      onClose()
+      setUploadProgress(100)
+      setStatusMessage('Success! Your post is live')
+      setPostStatus('success')
       
-    } catch (error) {
-      console.error('Error creating post:', error)
-      setError('Failed to create post. Please try again.')
-    } finally {
-      setIsSubmitting(false)
+      // Show success toast
+      setShowSuccessToast(true)
+      setTimeout(() => setShowSuccessToast(false), 3000)
+      
+      // Close modal after success
+      setTimeout(() => {
+        onPostCreated()
+        onClose()
+      }, 1500)
+      
+    } catch (err) {
+      console.error('Error creating post:', err)
+      setStatusMessage(err instanceof Error ? err.message : 'Failed to create post')
+      setPostStatus('error')
+      
+      // Reset error after 3 seconds
+      setTimeout(() => {
+        if (postStatus === 'error') {
+          setPostStatus('idle')
+          setStatusMessage('')
+        }
+      }, 3000)
     }
   }
 
   if (!isOpen) return null
 
-  const filteredMentions = MENTION_SUGGESTIONS.filter(
-    u => u.username.toLowerCase().includes(mentionQuery.toLowerCase()) ||
-         u.name.toLowerCase().includes(mentionQuery.toLowerCase())
-  )
-
   return (
     <>
+      {/* Success Toast Notification */}
+      {showSuccessToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] animate-slide-down">
+          <div className="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-full shadow-lg">
+            <CheckCircle className="h-4 w-4" />
+            <span className="text-sm font-medium">Post created successfully!</span>
+          </div>
+        </div>
+      )}
+
       {/* Backdrop */}
       <div 
         className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 animate-fade-in"
@@ -241,31 +235,62 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
       />
 
       {/* Modal */}
-      <div 
-        ref={modalRef}
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-white rounded-2xl shadow-2xl z-50 animate-scale-in overflow-hidden"
-      >
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-white rounded-2xl shadow-2xl z-50 animate-scale-in overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-orange-500" />
             <h2 className="text-lg font-semibold text-gray-900">Create Post</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-full hover:bg-gray-100 transition"
-          >
-            <X className="h-5 w-5 text-gray-500" />
-          </button>
+          {postStatus !== 'uploading' && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded-full hover:bg-gray-100 transition"
+            >
+              <X className="h-5 w-5 text-gray-500" />
+            </button>
+          )}
         </div>
 
         {/* Body */}
-        <div className="p-4">
+        <div className="p-4 max-h-[60vh] overflow-y-auto">
+          {/* Status Banner */}
+          {postStatus !== 'idle' && (
+            <div className={`mb-4 p-3 rounded-xl flex items-center gap-3 ${
+              postStatus === 'uploading' ? 'bg-blue-50 text-blue-600' :
+              postStatus === 'success' ? 'bg-green-50 text-green-600' :
+              'bg-red-50 text-red-600'
+            }`}>
+              {postStatus === 'uploading' && <Loader2 className="h-4 w-4 animate-spin" />}
+              {postStatus === 'success' && <CheckCircle className="h-4 w-4" />}
+              {postStatus === 'error' && <XCircle className="h-4 w-4" />}
+              <span className="text-sm">{statusMessage}</span>
+            </div>
+          )}
+
+          {/* Upload Progress Bar */}
+          {postStatus === 'uploading' && uploadProgress > 0 && (
+            <div className="mb-4">
+              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-orange-500 to-purple-600 transition-all duration-300 rounded-full"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1 text-center">
+                {uploadProgress < 30 ? 'Preparing...' : 
+                 uploadProgress < 70 ? 'Uploading media...' : 
+                 uploadProgress < 100 ? 'Creating post...' : 'Almost done!'}
+              </p>
+            </div>
+          )}
+
           {/* Feeling Picker */}
           <div className="mb-4">
             <button
               onClick={() => setShowFeelingPicker(!showFeelingPicker)}
               className="flex items-center gap-2 text-sm text-gray-500 hover:text-orange-500 transition"
+              disabled={postStatus === 'uploading'}
             >
               {selectedFeeling ? (
                 <>
@@ -315,64 +340,33 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
           </div>
 
           {/* Textarea */}
-          <div className="relative">
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={handleContentChange}
-              placeholder="What's on your mind? Type @ to mention someone..."
-              className="w-full resize-none border-0 focus:ring-0 text-gray-700 placeholder:text-gray-400 text-base outline-none min-h-[100px] bg-transparent"
-              rows={4}
-              autoFocus
-            />
-          </div>
-
-          {/* Mentions Dropdown */}
-          {showMentions && filteredMentions.length > 0 && (
-            <div className="mt-1 w-64 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden animate-fade-in">
-              {filteredMentions.map((user) => (
-                <button
-                  key={user.username}
-                  onClick={() => insertMention(user.username)}
-                  className="w-full px-3 py-2 flex items-center gap-2 hover:bg-gray-50 transition text-left"
-                >
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
-                    {user.name[0]}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{user.name}</p>
-                    <p className="text-xs text-gray-500">@{user.username}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="What's on your mind?"
+            className="w-full resize-none border-0 focus:ring-0 text-gray-700 placeholder:text-gray-400 text-base outline-none min-h-[100px] bg-transparent"
+            rows={4}
+            autoFocus
+            disabled={postStatus === 'uploading'}
+          />
 
           {/* Media Preview */}
           {mediaPreview && (
             <div className="relative mt-3 rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
-              <div className="relative">
-                {mediaType === 'image' ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={mediaPreview} alt="Preview" className="w-full max-h-64 object-contain" />
-                ) : (
-                  <video src={mediaPreview} className="w-full max-h-64 object-contain" controls />
-                )}
+              {mediaType === 'image' ? (
+                <img src={mediaPreview} alt="Preview" className="w-full max-h-64 object-contain" />
+              ) : (
+                <video src={mediaPreview} className="w-full max-h-64 object-contain" controls />
+              )}
+              {postStatus !== 'uploading' && (
                 <button
                   onClick={removeMedia}
                   className="absolute top-2 right-2 p-1.5 bg-black/60 rounded-full text-white hover:bg-black/80 transition"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
-              </div>
-            </div>
-          )}
-
-          {/* Error Message */}
-          {error && (
-            <div className="mt-3 p-2 bg-red-50 rounded-lg text-red-500 text-xs flex items-center gap-2">
-              <span>⚠️</span>
-              {error}
+              )}
             </div>
           )}
         </div>
@@ -386,37 +380,24 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
                 onClick={() => fileInputRef.current?.click()}
                 className="p-2 rounded-full hover:bg-gray-200 text-gray-500 transition"
                 title="Add image"
+                disabled={postStatus === 'uploading'}
               >
                 <ImageIcon className="h-5 w-5" />
               </button>
               <button
-                onClick={() => {
-                  const videoInput = document.createElement('input')
-                  videoInput.type = 'file'
-                  videoInput.accept = 'video/*'
-                  videoInput.onchange = (e) => handleMediaSelect(e as any, 'video')
-                  videoInput.click()
-                }}
+                onClick={() => videoInputRef.current?.click()}
                 className="p-2 rounded-full hover:bg-gray-200 text-gray-500 transition"
                 title="Add video"
+                disabled={postStatus === 'uploading'}
               >
                 <Video className="h-5 w-5" />
               </button>
               <button
                 className="p-2 rounded-full hover:bg-gray-200 text-gray-500 transition"
                 title="Add location"
+                disabled={postStatus === 'uploading'}
               >
                 <MapPin className="h-5 w-5" />
-              </button>
-              <button
-                className="p-2 rounded-full hover:bg-gray-200 text-gray-500 transition"
-                title="Tag someone"
-                onClick={() => {
-                  setContent(content + ' @')
-                  textareaRef.current?.focus()
-                }}
-              >
-                <AtSign className="h-5 w-5" />
               </button>
               <input
                 ref={fileInputRef}
@@ -425,29 +406,46 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
                 className="hidden"
                 onChange={(e) => handleMediaSelect(e, 'image')}
               />
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={(e) => handleMediaSelect(e, 'video')}
+              />
             </div>
             
+            {/* Character count */}
             <div className="text-xs text-gray-400">
-              {mediaType === 'image' ? '📷 Image ready' : mediaType === 'video' ? '🎥 Video ready' : '📝 Write something'}
+              {content.length}/1000
             </div>
           </div>
 
           {/* Post Button */}
           <button
             onClick={handleSubmit}
-            disabled={(!content.trim() && !mediaFile) || isSubmitting}
-            className="w-full py-2.5 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 text-white font-semibold hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-98"
+            disabled={(!content.trim() && !mediaFile) || postStatus === 'uploading'}
+            className={`w-full py-2.5 rounded-full font-semibold transition-all duration-200 active:scale-98 flex items-center justify-center gap-2 ${
+              postStatus === 'uploading'
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:shadow-lg'
+            }`}
           >
-            {isSubmitting ? (
-              <div className="flex items-center justify-center gap-2">
+            {postStatus === 'uploading' ? (
+              <>
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Posting...
-              </div>
+              </>
+            ) : postStatus === 'success' ? (
+              <>
+                <CheckCircle className="h-4 w-4" />
+                Posted!
+              </>
             ) : (
-              <div className="flex items-center justify-center gap-2">
+              <>
                 <Send className="h-4 w-4" />
                 Post to Feed
-              </div>
+              </>
             )}
           </button>
         </div>
@@ -462,8 +460,13 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
           from { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
           to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         }
+        @keyframes slide-down {
+          from { opacity: 0; transform: translate(-50%, -20px); }
+          to { opacity: 1; transform: translate(-50%, 0); }
+        }
         .animate-fade-in { animation: fade-in 0.2s ease-out; }
         .animate-scale-in { animation: scale-in 0.2s ease-out; }
+        .animate-slide-down { animation: slide-down 0.3s ease-out; }
       `}</style>
     </>
   )
