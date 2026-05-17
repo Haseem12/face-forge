@@ -1,126 +1,190 @@
 'use client'
 
-import Link from 'next/link'
-import Image from 'next/image'
-import { Heart, MessageCircle, Share2 } from 'lucide-react'
-import AvatarCircle from '@/components/dashboard/shared/avatar-circle'
-import { timeAgo } from '@/lib/dashboard/helpers'
-import { getForgeStyle } from '@/lib/dashboard/constants'
-import type { ForgeFeed } from '@/lib/dashboard/types'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import FeedCard, { FeedPost } from './FeedCard'
+import { Loader2, Sparkles } from 'lucide-react'
 
-export default function ForgeCard({
-  forge,
-  isFollowing,
-  isLiked,
-  currentUserId,
-  commentCount,
-  onFollow,
-  onLike,
-  onComment,
-}: {
-  forge: ForgeFeed
-  isFollowing: boolean
-  isLiked: boolean
-  currentUserId: string
-  commentCount: number
-  onFollow: () => void
-  onLike: () => void
-  onComment: () => void
-}) {
-  const creator = Array.isArray(forge.profiles) ? forge.profiles[0] : forge.profiles as any
-  const style = getForgeStyle(forge.template_type)
+export default function FeedsList({ currentUserId }: { currentUserId: string }) {
+  const [posts, setPosts] = useState<FeedPost[]>([])
+  const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set())
+  const [following, setFollowing] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(true)
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({})
+  const supabase = createClient()
+
+  useEffect(() => {
+    loadFeeds()
+    loadUserInteractions()
+  }, [])
+
+  const loadFeeds = async () => {
+    try {
+      const { data: postsData, error } = await supabase
+        .from('user_feeds')
+        .select(`
+          *,
+          profiles:user_id (
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      if (error) throw error
+      
+      const postsWithProfiles = (postsData || []).map(post => ({
+        ...post,
+        profiles: Array.isArray(post.profiles) ? post.profiles[0] : post.profiles
+      }))
+      
+      setPosts(postsWithProfiles)
+      
+      // Load comment counts
+      const postIds = postsWithProfiles.map(p => p.id)
+      if (postIds.length > 0) {
+        const { data: commentsData } = await supabase
+          .from('post_comments')
+          .select('post_id', { count: 'exact', head: false })
+          .in('post_id', postIds)
+        
+        const counts: Record<string, number> = {}
+        commentsData?.forEach(c => {
+          counts[c.post_id] = (counts[c.post_id] || 0) + 1
+        })
+        setCommentCounts(counts)
+      }
+      
+    } catch (error) {
+      console.error('Error loading feeds:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadUserInteractions = async () => {
+    if (!currentUserId) return
+    
+    // Load liked posts
+    const { data: likesData } = await supabase
+      .from('post_likes')
+      .select('post_id')
+      .eq('user_id', currentUserId)
+    
+    setLikedPosts(new Set(likesData?.map(l => l.post_id) || []))
+    
+    // Load following
+    const { data: followingData } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', currentUserId)
+    
+    setFollowing(new Set(followingData?.map(f => f.following_id) || []))
+  }
+
+  const handleLike = async (postId: string) => {
+    if (!currentUserId) return
+    
+    const isLiked = likedPosts.has(postId)
+    
+    if (isLiked) {
+      await supabase
+        .from('post_likes')
+        .delete()
+        .eq('post_id', postId)
+        .eq('user_id', currentUserId)
+      
+      setLikedPosts(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(postId)
+        return newSet
+      })
+      
+      setPosts(prev => prev.map(p => 
+        p.id === postId ? { ...p, likes_count: (p.likes_count || 0) - 1 } : p
+      ))
+    } else {
+      await supabase
+        .from('post_likes')
+        .insert({ post_id: postId, user_id: currentUserId })
+      
+      setLikedPosts(prev => new Set(prev).add(postId))
+      
+      setPosts(prev => prev.map(p => 
+        p.id === postId ? { ...p, likes_count: (p.likes_count || 0) + 1 } : p
+      ))
+    }
+  }
+
+  const handleFollow = async (creatorId: string) => {
+    if (!currentUserId || creatorId === currentUserId) return
+    
+    const isFollowed = following.has(creatorId)
+    
+    if (isFollowed) {
+      await supabase
+        .from('follows')
+        .delete()
+        .eq('follower_id', currentUserId)
+        .eq('following_id', creatorId)
+      
+      setFollowing(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(creatorId)
+        return newSet
+      })
+    } else {
+      await supabase
+        .from('follows')
+        .insert({ follower_id: currentUserId, following_id: creatorId })
+      
+      setFollowing(prev => new Set(prev).add(creatorId))
+    }
+  }
+
+  const handleTagClick = (tag: string) => {
+    // Navigate to search or filter by tag
+    console.log('Search for tag:', tag)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
+      </div>
+    )
+  }
+
+  if (posts.length === 0) {
+    return (
+      <div className="text-center py-12 bg-white rounded-2xl border border-gray-100 mx-4">
+        <div className="text-6xl mb-4">📝</div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">No posts yet</h3>
+        <p className="text-gray-500 text-sm">Be the first to share something!</p>
+      </div>
+    )
+  }
 
   return (
-    <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden w-full max-w-2xl mx-auto">
-      {/* Creator row */}
-      <div className="px-3 xs:px-4 pt-3 pb-2 flex items-center gap-2 xs:gap-3">
-        <Link href={`/profile/${creator?.username}`}>
-          <AvatarCircle src={creator?.avatar_url} name={creator?.display_name} size={36} />
-        </Link>
-        <div className="flex-1 min-w-0">
-          <Link href={`/profile/${creator?.username}`}>
-            <p className="text-sm font-bold truncate hover:text-orange-600 transition">
-              {creator?.display_name}
-            </p>
-          </Link>
-          <p className="text-[11px] text-gray-400 truncate">
-            @{creator?.username} · {timeAgo(forge.created_at)}
-          </p>
-        </div>
-        <span className="text-[9px] xs:text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-500 uppercase tracking-wide flex-shrink-0 whitespace-nowrap">
-          {forge.template_type || 'Forge'}
-        </span>
-      </div>
-
-      {/* Forge visual */}
-      <Link href={`/spark/${forge.id}`}>
-        <div className="mx-3 xs:mx-4 mb-3 cursor-pointer">
-          <div
-            className={`bg-gradient-to-br ${style.from} ${style.to} rounded-xl xs:rounded-2xl p-3 xs:p-4 flex items-center justify-between min-h-[88px] xs:min-h-[96px]`}
-          >
-            <div className="flex-1 min-w-0 pr-2 xs:pr-3">
-              <h2 className="text-sm xs:text-base font-black text-gray-800 line-clamp-1 mb-1">
-                {forge.name}
-              </h2>
-              {forge.description && (
-                <p className="text-xs text-gray-600 line-clamp-2 leading-relaxed">
-                  {forge.description}
-                </p>
-              )}
-            </div>
-            <span className="text-3xl xs:text-4xl flex-shrink-0">{style.icon}</span>
-          </div>
-        </div>
-      </Link>
-
-      {/* Action bar - Mobile optimized */}
-      <div className="border-t border-gray-100 px-2 xs:px-3 py-1.5 flex items-center gap-1 overflow-x-auto">
-        <button
-          onClick={onLike}
-          className={`flex items-center gap-1 px-2.5 xs:px-3 py-2 rounded-lg xs:rounded-xl text-xs font-semibold transition flex-shrink-0 ${
-            isLiked ? 'bg-red-50 text-red-500' : 'text-gray-500 hover:bg-gray-100'
-          }`}
-          title="Like"
-        >
-          <Heart className={`h-4 w-4 ${isLiked ? 'fill-red-500' : ''}`} />
-          <span className="hidden sm:inline">Like</span>
-        </button>
-
-        <button
-          onClick={onComment}
-          className="flex items-center gap-1 px-2.5 xs:px-3 py-2 rounded-lg xs:rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 transition flex-shrink-0"
-          title="Comment"
-        >
-          <MessageCircle className="h-4 w-4" />
-          <span className="hidden sm:inline">
-            {commentCount > 0 ? commentCount : 'Comment'}
-          </span>
-        </button>
-
-        <button
-          className="flex items-center gap-1 px-2.5 xs:px-3 py-2 rounded-lg xs:rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 transition flex-shrink-0"
-          title="Share"
-        >
-          <Share2 className="h-4 w-4" />
-          <span className="hidden sm:inline">Share</span>
-        </button>
-
-        <div className="flex-1 min-w-0" />
-
-        {currentUserId !== forge.user_id && (
-          <button
-            onClick={onFollow}
-            className={`flex items-center gap-1 h-8 px-3 xs:px-4 rounded-full text-xs font-bold transition flex-shrink-0 whitespace-nowrap ${
-              isFollowing
-                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                : 'bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:opacity-90'
-            }`}
-          >
-            <span className="hidden xs:inline">{isFollowing ? 'Following' : '+ Follow'}</span>
-            <span className="xs:hidden">{isFollowing ? '✓' : '+'}</span>
-          </button>
-        )}
-      </div>
-    </article>
+    <div className="space-y-4 pb-20">
+      {posts.map((post) => (
+        <FeedCard
+          key={post.id}
+          post={post}
+          isFollowing={following.has(post.user_id)}
+          isLiked={likedPosts.has(post.id)}
+          currentUserId={currentUserId}
+          commentCount={commentCounts[post.id] || 0}
+          onFollow={() => handleFollow(post.user_id)}
+          onLike={() => handleLike(post.id)}
+          onComment={() => {}}
+          onShare={() => {}}
+          onTagClick={handleTagClick}
+        />
+      ))}
+    </div>
   )
 }
