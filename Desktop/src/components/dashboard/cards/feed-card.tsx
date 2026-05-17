@@ -1,25 +1,16 @@
 'use client'
 
+import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { Heart, MessageCircle, Share2, Hash, Image as ImageIcon, Video, Sparkles } from 'lucide-react'
+import { 
+  Heart, MessageCircle, Share2, MoreHorizontal, 
+  Bookmark, Send, Smile, Image as ImageIcon, 
+  Video, X, Trash2, Flag, Copy, UserPlus, UserMinus,
+  Volume2, VolumeX, Play, Pause
+} from 'lucide-react'
 import AvatarCircle from '@/components/dashboard/shared/avatar-circle'
 import { timeAgo } from '@/lib/dashboard/helpers'
-
-// Category colors mapping
-const CATEGORY_STYLES: Record<string, { bg: string; text: string; border: string; from: string; to: string }> = {
-  tech: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200', from: 'from-blue-50', to: 'to-cyan-50' },
-  news: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200', from: 'from-red-50', to: 'to-orange-50' },
-  entertainment: { bg: 'bg-purple-50', text: 'text-purple-600', border: 'border-purple-200', from: 'from-purple-50', to: 'to-pink-50' },
-  gaming: { bg: 'bg-green-50', text: 'text-green-600', border: 'border-green-200', from: 'from-green-50', to: 'to-emerald-50' },
-  sports: { bg: 'bg-orange-50', text: 'text-orange-600', border: 'border-orange-200', from: 'from-orange-50', to: 'to-amber-50' },
-  music: { bg: 'bg-pink-50', text: 'text-pink-600', border: 'border-pink-200', from: 'from-pink-50', to: 'to-rose-50' },
-  art: { bg: 'bg-indigo-50', text: 'text-indigo-600', border: 'border-indigo-200', from: 'from-indigo-50', to: 'to-purple-50' },
-  business: { bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200', from: 'from-emerald-50', to: 'to-teal-50' },
-  science: { bg: 'bg-cyan-50', text: 'text-cyan-600', border: 'border-cyan-200', from: 'from-cyan-50', to: 'to-blue-50' },
-  lifestyle: { bg: 'bg-rose-50', text: 'text-rose-600', border: 'border-rose-200', from: 'from-rose-50', to: 'to-pink-50' },
-  general: { bg: 'bg-gray-50', text: 'text-gray-600', border: 'border-gray-200', from: 'from-gray-50', to: 'to-gray-100' },
-}
 
 export interface FeedPost {
   id: string
@@ -54,6 +45,9 @@ export default function FeedCard({
   onLike,
   onComment,
   onShare,
+  onDelete,
+  onEdit,
+  onReport,
   onTagClick,
 }: {
   post: FeedPost
@@ -65,195 +59,336 @@ export default function FeedCard({
   onLike: () => void
   onComment: () => void
   onShare: () => void
+  onDelete?: () => void
+  onEdit?: () => void
+  onReport?: () => void
   onTagClick?: (tag: string) => void
 }) {
+  const [showMenu, setShowMenu] = useState(false)
+  const [showComments, setShowComments] = useState(false)
+  const [commentText, setCommentText] = useState('')
+  const [isLiking, setIsLiking] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [isMuted, setIsMuted] = useState(true)
+  const [videoProgress, setVideoProgress] = useState(0)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  
   const creator = post.profiles
-  const categoryStyle = CATEGORY_STYLES[post.category || 'general'] || CATEGORY_STYLES.general
   const isImage = post.media_type === 'image'
   const isVideo = post.media_type === 'video'
   const tags = post.tags || []
+  const isOwnPost = currentUserId === post.user_id
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleLikeWithFeedback = () => {
+    setIsLiking(true)
+    onLike()
+    setTimeout(() => setIsLiking(false), 300)
+  }
+
+  const handleCommentSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (commentText.trim()) {
+      onComment()
+      setCommentText('')
+      setShowComments(false)
+    }
+  }
+
+  const toggleVideoPlay = () => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause()
+      } else {
+        videoRef.current.play()
+      }
+      setIsPlaying(!isPlaying)
+    }
+  }
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (videoRef.current) {
+      videoRef.current.muted = !isMuted
+      setIsMuted(!isMuted)
+    }
+  }
+
+  const handleVideoTimeUpdate = () => {
+    if (videoRef.current) {
+      const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100
+      setVideoProgress(progress)
+    }
+  }
 
   if (!creator) return null
 
-  // Get feeling emoji
-  const getFeelingDisplay = () => {
-    if (!post.feeling) return null
-    const feelingMap: Record<string, string> = {
-      Happy: '😊', Loving: '❤️', Grateful: '🙏', Sad: '😢',
-      Okay: '😐', Excited: '🎉', Chilling: '😎', Celebrating: '🥳'
-    }
-    return {
-      emoji: post.feeling_emoji || feelingMap[post.feeling] || '😊',
-      label: post.feeling
-    }
-  }
-  
-  const feeling = getFeelingDisplay()
-
   return (
-    <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden w-full max-w-2xl mx-auto hover:shadow-md transition-all duration-200">
-      {/* Creator row - Same as ForgeCard */}
-      <div className="px-3 xs:px-4 pt-3 pb-2 flex items-center gap-2 xs:gap-3">
-        <Link href={`/profile/${creator.username}`}>
-          <AvatarCircle src={creator.avatar_url} name={creator.display_name} size={36} />
-        </Link>
-        <div className="flex-1 min-w-0">
+    <article className="bg-white border border-gray-200 w-full max-w-2xl mx-auto mb-4">
+      
+      {/* Header - Profile, Name, @, Emotion, Time */}
+      <div className="px-4 pt-4 pb-2 flex items-start justify-between">
+        <div className="flex items-start gap-3">
           <Link href={`/profile/${creator.username}`}>
-            <p className="text-sm font-bold truncate hover:text-orange-600 transition">
-              {creator.display_name}
-            </p>
+            <AvatarCircle src={creator.avatar_url} name={creator.display_name} size={40} />
           </Link>
-          <p className="text-[11px] text-gray-400 truncate">
-            @{creator.username} · {timeAgo(post.created_at)}
-          </p>
-        </div>
-        
-        {/* Category Badge - Same style as forge template badge */}
-        {post.category && post.category !== 'general' && (
-          <span className={`text-[9px] xs:text-[10px] font-bold px-2 py-1 rounded-full ${categoryStyle.bg} ${categoryStyle.text} uppercase tracking-wide flex-shrink-0 whitespace-nowrap border ${categoryStyle.border}`}>
-            {post.category}
-          </span>
-        )}
-      </div>
-
-      {/* Feeling Indicator */}
-      {feeling && (
-        <div className="px-3 xs:px-4 mb-2">
-          <div className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50/80 px-2.5 py-1 rounded-full border border-gray-100">
-            <span className="text-sm">{feeling.emoji}</span>
-            <span>Feeling {feeling.label}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Post Content Block - Styled like forge visual */}
-      <Link href={`/post/${post.id}`}>
-        <div className="mx-3 xs:mx-4 mb-3 cursor-pointer">
-          <div className={`bg-gradient-to-br ${categoryStyle.from} ${categoryStyle.to} rounded-xl xs:rounded-2xl p-3 xs:p-4 min-h-[88px] xs:min-h-[96px] transition-all hover:shadow-sm`}>
-            
-            {/* Title */}
-            {post.title && (
-              <h2 className="text-sm xs:text-base font-black text-gray-800 line-clamp-1 mb-2">
-                {post.title}
-              </h2>
-            )}
-            
-            {/* Content Text */}
-            {post.content && (
-              <p className="text-xs xs:text-sm text-gray-600 line-clamp-3 leading-relaxed">
-                {post.content}
-              </p>
-            )}
-            
-            {/* Media indicator */}
-            {post.media_url && (
-              <div className="mt-2 flex items-center gap-1">
-                {isImage && <ImageIcon className="h-3 w-3 text-gray-400" />}
-                {isVideo && <Video className="h-3 w-3 text-gray-400" />}
-                <span className="text-[10px] text-gray-400">
-                  {isImage ? 'Image attached' : isVideo ? 'Video attached' : ''}
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link href={`/profile/${creator.username}`}>
+                <span className="font-semibold text-gray-900 hover:underline text-[15px]">
+                  {creator.display_name}
                 </span>
+              </Link>
+              <Link href={`/profile/${creator.username}`}>
+                <span className="text-gray-500 text-[13px]">@{creator.username}</span>
+              </Link>
+              <span className="text-gray-400 text-[13px]">·</span>
+              <span className="text-gray-400 text-[13px]">{timeAgo(post.created_at)}</span>
+            </div>
+            
+            {/* Emotion/Feeling */}
+            {post.feeling && (
+              <div className="flex items-center gap-1 mt-0.5">
+                <span className="text-sm">{post.feeling_emoji || '😊'}</span>
+                <span className="text-xs text-gray-500">feeling {post.feeling}</span>
               </div>
             )}
           </div>
         </div>
-      </Link>
+        
+        {/* Three dots menu */}
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setShowMenu(!showMenu)}
+            className="p-2 hover:bg-gray-100 transition-colors"
+          >
+            <MoreHorizontal className="h-5 w-5 text-gray-500" />
+          </button>
+          
+          {showMenu && (
+            <div className="absolute right-0 mt-1 w-56 bg-white shadow-lg border border-gray-200 z-20">
+              {isOwnPost ? (
+                <>
+                  <button 
+                    onClick={() => { onEdit?.(); setShowMenu(false); }}
+                    className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                  >
+                    <Copy className="h-4 w-4 text-gray-500" />
+                    Edit post
+                  </button>
+                  <button 
+                    onClick={() => { onDelete?.(); setShowMenu(false); }}
+                    className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 border-t border-gray-100"
+                  >
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                    Delete post
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button 
+                    onClick={() => { onReport?.(); setShowMenu(false); }}
+                    className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                  >
+                    <Flag className="h-4 w-4 text-gray-500" />
+                    Report post
+                  </button>
+                  <button 
+                    onClick={() => { onFollow(); setShowMenu(false); }}
+                    className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 border-t border-gray-100"
+                  >
+                    {isFollowing ? (
+                      <><UserMinus className="h-4 w-4 text-gray-500" /> Unfollow {creator.display_name}</>
+                    ) : (
+                      <><UserPlus className="h-4 w-4 text-gray-500" /> Follow {creator.display_name}</>
+                    )}
+                  </button>
+                  <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                    <Copy className="h-4 w-4 text-gray-500" />
+                    Copy link
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
-      {/* Full Media Preview (below the content) */}
+      {/* Content / Writeup */}
+      <div className="px-4 pb-3">
+        {post.title && (
+          <h3 className="font-bold text-gray-900 text-[17px] mb-1">{post.title}</h3>
+        )}
+        <p className="text-gray-800 text-[15px] leading-relaxed whitespace-pre-wrap break-words">
+          {post.content}
+        </p>
+      </div>
+
+      {/* Media - Image or Video (No "media attached" text) */}
       {post.media_url && (
-        <div className="mx-3 xs:mx-4 mb-3">
-          <div className="rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
-            {isImage ? (
-              <img
-                src={post.media_url}
-                alt={post.title || "Post image"}
-                className="w-full h-auto max-h-[350px] object-contain"
-              />
-            ) : isVideo ? (
+        <div className="mb-3">
+          {isImage ? (
+            <img
+              src={post.media_url}
+              alt={post.title || "Post image"}
+              className="w-full"
+            />
+          ) : isVideo && (
+            <div className="relative bg-black">
               <video
+                ref={videoRef}
                 src={post.media_url}
-                controls
-                className="w-full max-h-[350px] object-contain"
+                className="w-full cursor-pointer"
+                onClick={toggleVideoPlay}
+                onTimeUpdate={handleVideoTimeUpdate}
+                playsInline
               />
-            ) : null}
-          </div>
+              
+              {/* Video controls overlay */}
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3 opacity-0 hover:opacity-100 transition-opacity">
+                {/* Progress bar */}
+                <div className="w-full h-1 bg-white/30 rounded-full mb-2 cursor-pointer">
+                  <div 
+                    className="h-full bg-white rounded-full"
+                    style={{ width: `${videoProgress}%` }}
+                  />
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={toggleVideoPlay}
+                    className="text-white hover:text-gray-300 transition"
+                  >
+                    {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                  </button>
+                  
+                  <button
+                    onClick={toggleMute}
+                    className="text-white hover:text-gray-300 transition"
+                  >
+                    {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                  </button>
+                  
+                  <span className="text-white text-xs">
+                    {videoRef.current ? 
+                      `${Math.floor(videoRef.current.currentTime)}s / ${Math.floor(videoRef.current.duration)}s` : 
+                      '0s / 0s'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Tags */}
       {tags.length > 0 && (
-        <div className="px-3 xs:px-4 mb-3 flex flex-wrap gap-1.5">
+        <div className="px-4 pb-2 flex flex-wrap gap-1.5">
           {tags.map((tag) => (
             <button
               key={tag}
               onClick={() => onTagClick?.(tag)}
-              className="inline-flex items-center gap-0.5 text-xs text-orange-500 hover:text-orange-600 hover:underline transition"
+              className="text-[13px] text-blue-500 hover:text-blue-600 hover:underline"
             >
-              <Hash className="h-3 w-3" />
-              {tag}
+              #{tag}
             </button>
           ))}
         </div>
       )}
 
-      {/* Stats row - Same as ForgeCard */}
-      <div className="px-3 xs:px-4 pt-1 pb-1">
-        <div className="flex items-center gap-3 text-xs text-gray-400">
-          <span>{post.likes_count || 0} likes</span>
-          <span>{commentCount || 0} comments</span>
-          <span>{post.shares_count || 0} shares</span>
+      {/* Stats row - Likes and Comments */}
+      <div className="px-4 py-2 border-t border-gray-100">
+        <div className="flex items-center justify-between text-[13px] text-gray-500">
+          <div className="flex items-center gap-1">
+            <Heart className={`h-4 w-4 ${isLiked ? 'fill-red-500 text-red-500' : ''}`} />
+            <span>{post.likes_count || 0}</span>
+          </div>
+          <div className="flex gap-4">
+            <button onClick={() => setShowComments(!showComments)} className="hover:text-blue-500">
+              {commentCount || 0} comments
+            </button>
+            <button>{post.shares_count || 0} shares</button>
+          </div>
         </div>
       </div>
 
-      {/* Action bar - Same as ForgeCard */}
-      <div className="border-t border-gray-100 px-2 xs:px-3 py-1.5 flex items-center gap-1 overflow-x-auto">
+      {/* Interaction Buttons */}
+      <div className="flex border-t border-gray-100">
         <button
-          onClick={onLike}
-          className={`flex items-center gap-1 px-2.5 xs:px-3 py-2 rounded-lg xs:rounded-xl text-xs font-semibold transition flex-shrink-0 ${
-            isLiked ? 'bg-red-50 text-red-500' : 'text-gray-500 hover:bg-gray-100'
+          onClick={handleLikeWithFeedback}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
+            isLiked ? 'text-red-500' : 'text-gray-500 hover:text-red-500 hover:bg-red-50'
           }`}
-          title="Like"
         >
-          <Heart className={`h-4 w-4 ${isLiked ? 'fill-red-500' : ''}`} />
-          <span className="hidden sm:inline">Like</span>
+          <Heart className={`h-5 w-5 ${isLiked ? 'fill-red-500' : ''} ${isLiking ? 'scale-125' : ''} transition-transform`} />
+          Like
         </button>
-
+        
         <button
-          onClick={onComment}
-          className="flex items-center gap-1 px-2.5 xs:px-3 py-2 rounded-lg xs:rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 transition flex-shrink-0"
-          title="Comment"
+          onClick={() => setShowComments(!showComments)}
+          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium text-gray-500 hover:text-blue-500 hover:bg-blue-50"
         >
-          <MessageCircle className="h-4 w-4" />
-          <span className="hidden sm:inline">
-            {commentCount > 0 ? commentCount : 'Comment'}
-          </span>
+          <MessageCircle className="h-5 w-5" />
+          Comment
         </button>
-
+        
         <button
           onClick={onShare}
-          className="flex items-center gap-1 px-2.5 xs:px-3 py-2 rounded-lg xs:rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 transition flex-shrink-0"
-          title="Share"
+          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium text-gray-500 hover:text-green-500 hover:bg-green-50"
         >
-          <Share2 className="h-4 w-4" />
-          <span className="hidden sm:inline">Share</span>
+          <Share2 className="h-5 w-5" />
+          Share
         </button>
+      </div>
 
-        <div className="flex-1 min-w-0" />
-
-        {currentUserId !== post.user_id && (
+      {/* Follow button (if not own post) */}
+      {!isOwnPost && (
+        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
           <button
             onClick={onFollow}
-            className={`flex items-center gap-1 h-8 px-3 xs:px-4 rounded-full text-xs font-bold transition flex-shrink-0 whitespace-nowrap ${
+            className={`w-full py-2 text-sm font-semibold transition-colors ${
               isFollowing
-                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                : 'bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:opacity-90'
+                ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                : 'bg-black text-white hover:bg-gray-800'
             }`}
           >
-            <span className="hidden xs:inline">{isFollowing ? 'Following' : '+ Follow'}</span>
-            <span className="xs:hidden">{isFollowing ? '✓' : '+'}</span>
+            {isFollowing ? '✓ Following' : '+ Follow'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Comments section */}
+      {showComments && (
+        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
+          <form onSubmit={handleCommentSubmit} className="flex gap-2">
+            <AvatarCircle src={creator.avatar_url} name={creator.display_name} size={32} />
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder="Write a comment..."
+                className="w-full px-3 py-2 bg-white border border-gray-300 text-sm focus:outline-none focus:border-gray-500"
+              />
+            </div>
+            {commentText.trim() && (
+              <button type="submit" className="text-black font-semibold text-sm">
+                Post
+              </button>
+            )}
+          </form>
+        </div>
+      )}
     </article>
   )
-              }
+}
