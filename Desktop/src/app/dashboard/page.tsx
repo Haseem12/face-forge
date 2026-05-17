@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell
+  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell, Sparkles, Users
 } from 'lucide-react'
 import Link from 'next/link'
 import ThreeCurveFab from '@/components/dashboard/layout/three-curve-fab'
@@ -18,6 +18,7 @@ import Sidebar from '@/components/dashboard/layout/sidebar'
 import EmptyFeed from '@/components/dashboard/layout/empty-feed'
 import NewsCard from '@/components/dashboard/cards/news-card'
 import ForgeCard from '@/components/dashboard/cards/forge-card'
+import FeedCard from '@/components/dashboard/cards/feed-card'
 import CardSkeleton from '@/components/dashboard/cards/card-skeleton'
 import CommentPanel from '@/components/dashboard/comments/comment-panel'
 import ArticleReader from '@/components/dashboard/news/ArticleReader'
@@ -42,27 +43,31 @@ export default function DashboardPage() {
   const supabase = createClient()
   const router = useRouter()
 
-  // ── Existing State ──────────────────────────────────────────────────────────
+  // ── State ──────────────────────────────────────────────────────────
   const [feedItems, setFeedItems] = useState<ForgeFeed[]>([])
   const [newsItems, setNewsItems] = useState<NewsArticle[]>([])
+  const [followingFeedPosts, setFollowingFeedPosts] = useState<any[]>([])
   const [suggestedUsers, setSuggested] = useState<any[]>([])
   const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
   const [followedProfiles, setFollowedProfiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [newsLoading, setNewsLoading] = useState(true)
+  const [followingFeedLoading, setFollowingFeedLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
   const [following, setFollowing] = useState<Set<string>>(new Set())
   const [likedForges, setLikedForges] = useState<Set<string>>(new Set())
   const [likedNews, setLikedNews] = useState<Set<string>>(new Set())
+  const [likedFollowingFeed, setLikedFollowingFeed] = useState<Set<string>>(new Set())
   const [newsCC, setNewsCC] = useState<Record<string, number>>({})
   const [forgeCC, setForgeCC] = useState<Record<string, number>>({})
+  const [followingFeedCC, setFollowingFeedCC] = useState<Record<string, number>>({})
   const [shareCopied, setShareCopied] = useState<string | null>(null)
   const [showAllNews, setShowAllNews] = useState(false)
   const [activeTab, setActiveTab] = useState<'forYou' | 'following'>('forYou')
-  const [commentPanel, setCommentPanel] = useState<{ articleId?: string; forgeId?: string } | null>(null)
+  const [commentPanel, setCommentPanel] = useState<{ articleId?: string; forgeId?: string; feedId?: string } | null>(null)
   const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
   
-  // ── New State for Auto-Refresh & Infinite Scroll ───────────────────────────
+  // ── State for Auto-Refresh & Infinite Scroll ───────────────────────────
   const [displayedNews, setDisplayedNews] = useState<NewsArticle[]>([])
   const [newsPage, setNewsPage] = useState(1)
   const [hasMoreNews, setHasMoreNews] = useState(true)
@@ -72,6 +77,76 @@ export default function DashboardPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [showRefreshToast, setShowRefreshToast] = useState(false)
   const observerTarget = useRef<HTMLDivElement>(null)
+
+  // ── Load Following Feed Posts (from users you follow + your own posts) ──
+  const loadFollowingFeedPosts = useCallback(async () => {
+    if (!user) return
+    setFollowingFeedLoading(true)
+    try {
+      // Get IDs of users you follow
+      const followingIds = Array.from(following)
+      
+      // Include your own user ID
+      const allUserIds = [...followingIds, user.id]
+      
+      if (allUserIds.length === 0) {
+        setFollowingFeedPosts([])
+        setFollowingFeedLoading(false)
+        return
+      }
+      
+      const { data: posts, error } = await supabase
+        .from('user_feeds')
+        .select(`
+          *,
+          profiles:user_id (
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .in('user_id', allUserIds)
+        .order('created_at', { ascending: false })
+        .limit(50)
+      
+      if (error) throw error
+      
+      const postsWithProfiles = (posts || []).map(post => ({
+        ...post,
+        profiles: Array.isArray(post.profiles) ? post.profiles[0] : post.profiles
+      }))
+      
+      setFollowingFeedPosts(postsWithProfiles)
+      
+      // Load likes for current user
+      if (user && postsWithProfiles.length) {
+        const postIds = postsWithProfiles.map(p => p.id)
+        const { data: likes } = await supabase
+          .from('post_likes')
+          .select('post_id')
+          .eq('user_id', user.id)
+          .in('post_id', postIds)
+        
+        setLikedFollowingFeed(new Set(likes?.map(l => l.post_id) || []))
+        
+        // Load comment counts
+        const { data: comments } = await supabase
+          .from('post_comments')
+          .select('post_id')
+          .in('post_id', postIds)
+        
+        const cc: Record<string, number> = {}
+        comments?.forEach((c: any) => { cc[c.post_id] = (cc[c.post_id] || 0) + 1 })
+        setFollowingFeedCC(cc)
+      }
+      
+    } catch (error) {
+      console.error('Error loading following feed posts:', error)
+    } finally {
+      setFollowingFeedLoading(false)
+    }
+  }, [supabase, user, following])
 
   // ── Load News with Cache Busting ──────────────────────────────────────────
   const loadNews = useCallback(async (currentUser: any, forceRefresh = false) => {
@@ -113,48 +188,41 @@ export default function DashboardPage() {
     }
   }, [supabase])
 
-  // ── Auto-Refresh News Every 5 Minutes ─────────────────────────────────────
-  // Faster refresh - every 2 minutes instead of 5
-useEffect(() => {
-  const interval = setInterval(() => {
-    if (user) {
-      refreshNews()
+  // ── Auto-Refresh News ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (user) {
+        refreshNews()
+      }
+    }, 2 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [user])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user) {
+        refreshNews()
+      }
     }
-  }, 2 * 60 * 1000) // 2 minutes - more frequent updates
-  
-  return () => clearInterval(interval)
-}, [user])
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [user])
 
-// Refresh on tab focus - immediate
-useEffect(() => {
-  const handleVisibilityChange = () => {
-    if (document.visibilityState === 'visible' && user) {
-      // Refresh immediately when tab becomes visible
-      refreshNews()
+  const refreshNews = useCallback(async () => {
+    if (refreshing || !user) return
+    setRefreshing(true)
+    try {
+      await loadNews(user, true)
+      setShowRefreshToast(true)
+      setTimeout(() => setShowRefreshToast(false), 2000)
+    } catch (error) {
+      console.error('Failed to refresh news:', error)
+    } finally {
+      setRefreshing(false)
     }
-  }
-  
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-}, [user])
+  }, [refreshing, user, loadNews])
 
-// Refresh function with better error handling
-const refreshNews = useCallback(async () => {
-  if (refreshing || !user) return
-  
-  setRefreshing(true)
-  try {
-    await loadNews(user, true)
-    setShowRefreshToast(true)
-    setTimeout(() => setShowRefreshToast(false), 2000)
-  } catch (error) {
-    console.error('Failed to refresh news:', error)
-  } finally {
-    setRefreshing(false)
-  }
-}, [refreshing, user, loadNews])
-
-  // ── Update displayed news when newsItems change (for infinite scroll) ─────
+  // ── Update displayed news when newsItems change ─────────────────────────────
   useEffect(() => {
     if (newsItems.length > 0) {
       const initialCount = showAllNews ? newsItems.length : Math.min(5, newsItems.length)
@@ -189,7 +257,14 @@ const refreshNews = useCallback(async () => {
     return () => observer.disconnect()
   }, [hasMoreNews, newsLoading, newsPage, newsItems, showAllNews])
 
-  // ── Existing useEffect for user data loading ──────────────────────────────
+  // ── Reload following feed when following changes ──────────────────────────
+  useEffect(() => {
+    if (user) {
+      loadFollowingFeedPosts()
+    }
+  }, [following, user, loadFollowingFeedPosts])
+
+  // ── Main useEffect for user data loading ──────────────────────────────────
   useEffect(() => {
     const load = async () => {
       try {
@@ -230,9 +305,11 @@ const refreshNews = useCallback(async () => {
         const { data: liked } = await supabase.from('interactions').select('forge_id').eq('user_id', au.id).eq('interaction_type', 'like')
         setLikedForges(new Set((liked || []).map((i: any) => i.forge_id)))
 
-        setLoading(false)
         await loadNews(au)
+        
+        setLoading(false)
       } catch (e) {
+        console.error('Load error:', e)
         setLoading(false)
       }
     }
@@ -266,6 +343,21 @@ const refreshNews = useCallback(async () => {
     else await supabase.from('news_likes').insert({ article_id: id, user_id: user.id })
   }
 
+  const handleFollowingFeedLike = async (postId: string) => {
+    if (!user) return
+    const isLiked = likedFollowingFeed.has(postId)
+    
+    if (isLiked) {
+      await supabase.from('post_likes').delete().eq('post_id', postId).eq('user_id', user.id)
+      setLikedFollowingFeed(prev => { const n = new Set(prev); n.delete(postId); return n })
+      setFollowingFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, likes_count: (p.likes_count || 0) - 1 } : p))
+    } else {
+      await supabase.from('post_likes').insert({ post_id: postId, user_id: user.id })
+      setLikedFollowingFeed(prev => new Set(prev).add(postId))
+      setFollowingFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, likes_count: (p.likes_count || 0) + 1 } : p))
+    }
+  }
+
   const handleShare = (url: string, id: string) => {
     navigator.clipboard.writeText(url).catch(() => {})
     setShareCopied(id)
@@ -297,7 +389,6 @@ const refreshNews = useCallback(async () => {
   }
 
   // ── Derived View Logic ─────────────────────────────────────────────────────
-  const followingForges = feedItems.filter(f => following.has(f.user_id))
   const currentNewsList = showAllNews ? newsItems : displayedNews
 
   const usersWithSelf: any[] = []
@@ -350,7 +441,7 @@ const refreshNews = useCallback(async () => {
         
         <div className="lg:col-span-2 space-y-8">
           
-          {/* ── TAB 1: FOR YOU (NEWS ONLY) ─────────────────────────────────── */}
+             {/* ── TAB 1: FOR YOU (NEWS ONLY) ─────────────────────────────────── */}
           {activeTab === 'forYou' && (
             <>
               {/* Trending Tags Section */}
@@ -368,7 +459,7 @@ const refreshNews = useCallback(async () => {
                 </div>
               </div>
 
-              {/* News Feed Section with Auto-Refresh */}
+              {/* News Feed Section */}
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
@@ -428,31 +519,43 @@ const refreshNews = useCallback(async () => {
             </>
           )}
 
-          {/* ── TAB 2: FOLLOWING (CREATOR FORGES ONLY) ────────────────────── */}
+
+        {/* ── TAB 2: FOLLOWING (FEED POSTS FROM FOLLOWED USERS + YOUR POSTS) ── */}
           {activeTab === 'following' && (
-            <section className="max-w-md mx-auto lg:max-w-none">
+            <section>
               <div className="flex items-center gap-2 mb-4">
-                <Zap className="h-5 w-5 text-purple-500" />
+                <Users className="h-5 w-5 text-purple-500" />
                 <h2 className="text-sm font-black text-gray-900 uppercase tracking-tight">Following Feed</h2>
               </div>
               
-              {followingForges.length === 0 ? (
-                <EmptyFeed />
+              {followingFeedPosts.length === 0 && !followingFeedLoading ? (
+                <EmptyFeed 
+                  title="No posts from people you follow"
+                  description="When you or people you follow share posts, they'll appear here"
+                />
               ) : (
-                <div className="space-y-6">
-                  {followingForges.map(forge => (
-                    <ForgeCard
-                      key={forge.id}
-                      forge={forge}
-                      isFollowing={true}
-                      isLiked={likedForges.has(forge.id)}
+                <div className="space-y-4">
+                  {followingFeedPosts.map((post) => (
+                    <FeedCard
+                      key={post.id}
+                      post={post}
+                      isFollowing={following.has(post.user_id)}
+                      isLiked={likedFollowingFeed.has(post.id)}
                       currentUserId={user?.id || ''}
-                      commentCount={forgeCC[forge.id] || 0}
-                      onFollow={() => handleFollow(forge.user_id)}
-                      onLike={() => handleForgeLike(forge.id)}
-                      onComment={() => setCommentPanel({ forgeId: forge.id })}
+                      commentCount={followingFeedCC[post.id] || 0}
+                      onFollow={() => handleFollow(post.user_id)}
+                      onLike={() => handleFollowingFeedLike(post.id)}
+                      onComment={() => setCommentPanel({ feedId: post.id })}
+                      onShare={() => handleShare(`/post/${post.id}`, post.id)}
+                      onTagClick={(tag) => console.log('Search tag:', tag)}
                     />
                   ))}
+                  
+                  {followingFeedLoading && (
+                    <div className="flex justify-center py-8">
+                      <div className="w-8 h-8 border-3 border-gray-200 border-t-orange-500 rounded-full animate-spin" />
+                    </div>
+                  )}
                 </div>
               )}
             </section>
@@ -474,16 +577,16 @@ const refreshNews = useCallback(async () => {
       {/* FAB */}
       <ThreeCurveFab />
 
-    {commentPanel && (
-  <div className="fixed inset-0 z-[60]">
-    <CommentPanel
-      articleId={commentPanel.articleId}
-      forgeId={commentPanel.forgeId}
-      currentUser={user}
-      onClose={() => setCommentPanel(null)}
-    />
-  </div>
-)}
+      {commentPanel && (
+        <div className="fixed inset-0 z-[60]">
+          <CommentPanel
+            articleId={commentPanel.articleId}
+            forgeId={commentPanel.forgeId}
+            currentUser={user}
+            onClose={() => setCommentPanel(null)}
+          />
+        </div>
+      )}
 
       {viewingStoryUserId && (
         <StoryViewer userId={viewingStoryUserId} onClose={() => setViewingStoryUserId(null)} />
@@ -496,23 +599,9 @@ const refreshNews = useCallback(async () => {
           onClose={() => setSelectedArticle(null)}
           onNext={handleNextArticle}
           onPrevious={handlePreviousArticle}
-          hasNext={currentArticleIndex < currentNewsList.length - 1}
+          hasNext={currentArticleIndex < (showAllNews ? newsItems.length : displayedNews.length) - 1}
           hasPrevious={currentArticleIndex > 0}
-          isLiked={likedNews.has(selectedArticle.id)}
-          commentCount={newsCC[selectedArticle.id] || 0}
-          onLike={() => handleNewsLike(selectedArticle.id)}
-          onComment={() => setCommentPanel({ articleId: selectedArticle.id })}
         />
-      )}
-
-      {/* Refresh Toast Notification */}
-      {showRefreshToast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
-          <div className="bg-gray-900 text-white px-4 py-2 rounded-full text-sm flex items-center gap-2 shadow-lg">
-            <RefreshCw className="h-4 w-4" />
-            News refreshed with latest articles!
-          </div>
-        </div>
       )}
     </div>
   )
