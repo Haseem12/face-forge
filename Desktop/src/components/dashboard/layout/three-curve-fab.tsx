@@ -3,9 +3,12 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { Plus, Sparkles, PenTool, MessageCircle, Zap, Rocket, Send } from 'lucide-react'
+import CreatePostModal from '@/components/CreatePostModal'
+import { createClient } from '@/lib/supabase/client'
 
 interface Action {
-  href: string
+  href?: string
+  onClick?: () => void
   icon: React.ReactNode
   label: string
   gradient: string
@@ -23,7 +26,7 @@ const actions: Action[] = [
     iconAnimation: 'animate-pulse-slow',
   },
   {
-    href: '/dashboard/feeds/create',
+    // Remove href, we'll use onClick to open modal
     icon: <PenTool className="h-5 w-5" />,
     label: 'Post',
     gradient: 'from-blue-500 to-cyan-500',
@@ -44,7 +47,19 @@ export default function ThreeCurveFab() {
   const [open, setOpen] = useState(false)
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
   const [ripple, setRipple] = useState(false)
+  const [isPostModalOpen, setIsPostModalOpen] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const supabase = createClient()
+
+  // Get current user
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) setUserId(user.id)
+    }
+    getUser()
+  }, [supabase])
 
   // Close when clicking outside
   useEffect(() => {
@@ -71,6 +86,32 @@ export default function ThreeCurveFab() {
     setTimeout(() => setRipple(false), 500)
     setOpen(!open)
   }
+
+  const handleActionClick = (action: Action) => {
+    if (action.onClick) {
+      action.onClick()
+    } else if (action.href) {
+      // Navigation will be handled by Link component
+      setOpen(false)
+    }
+  }
+
+  const handlePostClick = () => {
+    setOpen(false)
+    setIsPostModalOpen(true)
+  }
+
+  const handlePostCreated = () => {
+    // Refresh feed or show success toast
+    console.log('Post created successfully')
+  }
+
+  // Update the Post action with onClick
+  const updatedActions = actions.map(action => 
+    action.label === 'Post' 
+      ? { ...action, onClick: handlePostClick }
+      : action
+  )
 
   return (
     <>
@@ -142,7 +183,7 @@ export default function ThreeCurveFab() {
         {/* Action buttons – 3D fan out */}
         <div className="relative">
           {open &&
-            actions.map((action, idx) => {
+            updatedActions.map((action, idx) => {
               // 3D fan angles with depth
               const angle = 190 + idx * 35
               const rad = (angle * Math.PI) / 180
@@ -152,11 +193,78 @@ export default function ThreeCurveFab() {
               const zIndex = 10 - idx
               const delay = idx * 0.05
               
+              // If it has href, use Link; otherwise use button
+              if (action.href) {
+                return (
+                  <Link
+                    key={action.label}
+                    href={action.href}
+                    onClick={() => setOpen(false)}
+                    className="absolute group transition-all duration-500 ease-out transform-gpu"
+                    style={{
+                      transform: `translate(${x}px, ${y}px) translateZ(${idx * 10}px) rotate(${idx * 5}deg)`,
+                      opacity: 1,
+                      pointerEvents: 'auto',
+                      zIndex,
+                      transitionDelay: `${delay}s`,
+                    }}
+                    onMouseEnter={() => setHoveredIndex(idx)}
+                    onMouseLeave={() => setHoveredIndex(null)}
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="relative">
+                        <div
+                          className={`absolute inset-0 rounded-full bg-gradient-to-r ${action.gradient} blur-xl transition-all duration-300 ${
+                            hoveredIndex === idx ? 'opacity-100 scale-110' : 'opacity-50 scale-100'
+                          }`}
+                        />
+                        <div
+                          className={`relative h-14 w-14 rounded-full bg-gradient-to-r ${action.gradient} shadow-2xl flex items-center justify-center text-white transition-all duration-300 transform-gpu hover:scale-110 active:scale-95 ${
+                            hoveredIndex === idx ? 'scale-110 shadow-2xl' : 'scale-100'
+                          }`}
+                          style={{
+                            boxShadow: hoveredIndex === idx 
+                              ? `0 10px 30px -5px rgba(0,0,0,0.3), 0 0 20px rgba(255,255,255,0.5)`
+                              : `0 5px 20px -3px rgba(0,0,0,0.2)`,
+                            transformStyle: 'preserve-3d',
+                            transform: hoveredIndex === idx ? 'translateZ(10px) rotateX(5deg)' : 'translateZ(0)',
+                          }}
+                        >
+                          <div className={action.iconAnimation}>
+                            {action.icon}
+                          </div>
+                          <div className="absolute inset-0 rounded-full bg-gradient-to-t from-white/0 via-white/20 to-white/40 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                        <div
+                          className={`absolute inset-0 rounded-full border-2 border-white/30 animate-spin-slow pointer-events-none ${
+                            hoveredIndex === idx ? 'opacity-100' : 'opacity-0'
+                          }`}
+                          style={{ animationDuration: '3s' }}
+                        />
+                      </div>
+                      <span
+                        className={`text-[11px] font-bold bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-full text-white shadow-lg transition-all duration-300 border border-white/20 ${
+                          hoveredIndex === idx ? 'scale-110 bg-black/90' : 'scale-100'
+                        }`}
+                        style={{
+                          transform: hoveredIndex === idx ? 'translateY(-2px)' : 'translateY(0)',
+                        }}
+                      >
+                        {action.label}
+                      </span>
+                    </div>
+                  </Link>
+                )
+              }
+              
+              // For Post button (no href) - use button with onClick
               return (
-                <Link
-                  key={action.href}
-                  href={action.href}
-                  onClick={() => setOpen(false)}
+                <button
+                  key={action.label}
+                  onClick={() => {
+                    if (action.onClick) action.onClick()
+                    setOpen(false)
+                  }}
                   className="absolute group transition-all duration-500 ease-out transform-gpu"
                   style={{
                     transform: `translate(${x}px, ${y}px) translateZ(${idx * 10}px) rotate(${idx * 5}deg)`,
@@ -169,16 +277,12 @@ export default function ThreeCurveFab() {
                   onMouseLeave={() => setHoveredIndex(null)}
                 >
                   <div className="flex flex-col items-center gap-2">
-                    {/* 3D Card with depth */}
                     <div className="relative">
-                      {/* Outer glow ring */}
                       <div
                         className={`absolute inset-0 rounded-full bg-gradient-to-r ${action.gradient} blur-xl transition-all duration-300 ${
                           hoveredIndex === idx ? 'opacity-100 scale-110' : 'opacity-50 scale-100'
                         }`}
                       />
-                      
-                      {/* Main button with 3D effect */}
                       <div
                         className={`relative h-14 w-14 rounded-full bg-gradient-to-r ${action.gradient} shadow-2xl flex items-center justify-center text-white transition-all duration-300 transform-gpu hover:scale-110 active:scale-95 ${
                           hoveredIndex === idx ? 'scale-110 shadow-2xl' : 'scale-100'
@@ -191,16 +295,11 @@ export default function ThreeCurveFab() {
                           transform: hoveredIndex === idx ? 'translateZ(10px) rotateX(5deg)' : 'translateZ(0)',
                         }}
                       >
-                        {/* Animated icon */}
                         <div className={action.iconAnimation}>
                           {action.icon}
                         </div>
-                        
-                        {/* Inner shine effect */}
                         <div className="absolute inset-0 rounded-full bg-gradient-to-t from-white/0 via-white/20 to-white/40 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
-                      
-                      {/* Orbiting ring */}
                       <div
                         className={`absolute inset-0 rounded-full border-2 border-white/30 animate-spin-slow pointer-events-none ${
                           hoveredIndex === idx ? 'opacity-100' : 'opacity-0'
@@ -208,8 +307,6 @@ export default function ThreeCurveFab() {
                         style={{ animationDuration: '3s' }}
                       />
                     </div>
-                    
-                    {/* Label with 3D pop effect */}
                     <span
                       className={`text-[11px] font-bold bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-full text-white shadow-lg transition-all duration-300 border border-white/20 ${
                         hoveredIndex === idx ? 'scale-110 bg-black/90' : 'scale-100'
@@ -221,7 +318,7 @@ export default function ThreeCurveFab() {
                       {action.label}
                     </span>
                   </div>
-                </Link>
+                </button>
               )
             })}
 
@@ -289,6 +386,16 @@ export default function ThreeCurveFab() {
           </div>
         )}
       </div>
+
+      {/* Create Post Modal */}
+      {userId && (
+        <CreatePostModal
+          isOpen={isPostModalOpen}
+          onClose={() => setIsPostModalOpen(false)}
+          onPostCreated={handlePostCreated}
+          userId={userId}
+        />
+      )}
     </>
   )
 }
