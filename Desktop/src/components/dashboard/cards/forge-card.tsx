@@ -22,9 +22,7 @@ const CATEGORY_STYLES: Record<string, { bg: string; text: string; border: string
   general: { bg: 'bg-gray-50', text: 'text-gray-600', border: 'border-gray-200' },
 }
 
-// Type for the unified card
 export interface UnifiedCardProps {
-  // Common fields
   id: string
   user_id: string
   created_at: string
@@ -39,12 +37,11 @@ export interface UnifiedCardProps {
   }
   
   // Forge specific
-  type?: 'forge'
   name?: string
   description?: string
   template_type?: string
   
-  // Feed specific
+  // Feed specific - THESE ARE THE KEY FIELDS
   content?: string
   title?: string
   media_url?: string
@@ -53,6 +50,9 @@ export interface UnifiedCardProps {
   tags?: string[]
   feeling?: string
   feeling_emoji?: string
+  
+  // Type discriminator - USE THIS to explicitly tell which type it is
+  itemType: 'forge' | 'feed'
 }
 
 export default function UnifiedCard({
@@ -79,8 +79,9 @@ export default function UnifiedCard({
   onTagClick?: (tag: string) => void
 }) {
   const creator = item.profiles
-  const isForge = item.type === 'forge' || (!item.content && item.name)
-  const isFeed = !isForge
+  // Use explicit itemType instead of guessing
+  const isForge = item.itemType === 'forge'
+  const isFeed = item.itemType === 'feed'
   
   // Forge styles
   const forgeStyle = isForge && item.template_type ? getForgeStyle(item.template_type) : null
@@ -92,21 +93,24 @@ export default function UnifiedCard({
   const isVideo = item.media_type === 'video'
   const tags = item.tags || []
 
+  // Don't render if no creator
+  if (!creator) return null
+
   return (
     <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden w-full max-w-2xl mx-auto hover:shadow-md transition-all duration-200">
       {/* Creator row */}
       <div className="px-3 xs:px-4 pt-3 pb-2 flex items-center gap-2 xs:gap-3">
-        <Link href={`/profile/${creator?.username}`}>
-          <AvatarCircle src={creator?.avatar_url} name={creator?.display_name} size={36} />
+        <Link href={`/profile/${creator.username}`}>
+          <AvatarCircle src={creator.avatar_url} name={creator.display_name} size={36} />
         </Link>
         <div className="flex-1 min-w-0">
-          <Link href={`/profile/${creator?.username}`}>
+          <Link href={`/profile/${creator.username}`}>
             <p className="text-sm font-bold truncate hover:text-orange-600 transition">
-              {creator?.display_name}
+              {creator.display_name}
             </p>
           </Link>
           <p className="text-[11px] text-gray-400 truncate">
-            @{creator?.username} · {timeAgo(item.created_at)}
+            @{creator.username} · {timeAgo(item.created_at)}
           </p>
         </div>
         
@@ -134,11 +138,11 @@ export default function UnifiedCard({
         </div>
       )}
 
-      {/* Main Content - Forge Visual or Feed Content */}
+      {/* Main Content */}
       <Link href={isForge ? `/spark/${item.id}` : `/post/${item.id}`}>
         <div className="mx-3 xs:mx-4 mb-3 cursor-pointer">
           {isForge ? (
-            // Forge Visual
+            // FORGE VISUAL
             <div
               className={`bg-gradient-to-br ${forgeStyle?.from} ${forgeStyle?.to} rounded-xl xs:rounded-2xl p-3 xs:p-4 flex items-center justify-between min-h-[88px] xs:min-h-[96px]`}
             >
@@ -152,30 +156,45 @@ export default function UnifiedCard({
                   </p>
                 )}
               </div>
-              <span className="text-3xl xs:text-4xl flex-shrink-0">{forgeStyle?.icon}</span>
+              <span className="text-3xl xs:text-4xl flex-shrink-0">{forgeStyle?.icon || '✨'}</span>
             </div>
           ) : (
-            // Feed Content
-            <div className={`bg-gradient-to-br ${item.category === 'tech' ? 'from-blue-50 to-cyan-50' : 
-                             item.category === 'news' ? 'from-red-50 to-orange-50' :
-                             item.category === 'gaming' ? 'from-green-50 to-emerald-50' :
-                             item.category === 'music' ? 'from-pink-50 to-rose-50' :
-                             item.category === 'art' ? 'from-purple-50 to-indigo-50' :
-                             'from-gray-50 to-gray-100'} rounded-xl xs:rounded-2xl p-3 xs:p-4 min-h-[88px] xs:min-h-[96px] transition-all hover:shadow-sm`}>
+            // FEED CONTENT - This is what should show for your posts!
+            <div className={`bg-gradient-to-br ${
+              item.category === 'tech' ? 'from-blue-50 to-cyan-50' : 
+              item.category === 'news' ? 'from-red-50 to-orange-50' :
+              item.category === 'gaming' ? 'from-green-50 to-emerald-50' :
+              item.category === 'music' ? 'from-pink-50 to-rose-50' :
+              item.category === 'art' ? 'from-purple-50 to-indigo-50' :
+              'from-gray-50 to-gray-100'} rounded-xl xs:rounded-2xl p-3 xs:p-4 min-h-[88px] xs:min-h-[96px] transition-all hover:shadow-sm`}>
               
+              {/* Title */}
               {item.title && (
                 <h2 className="text-sm xs:text-base font-black text-gray-800 line-clamp-1 mb-2">
                   {item.title}
                 </h2>
               )}
               
+              {/* Content - THIS IS WHERE YOUR TEXT SHOULD APPEAR */}
               {item.content && (
                 <p className="text-xs xs:text-sm text-gray-600 line-clamp-3 leading-relaxed">
                   {item.content}
                 </p>
               )}
               
-              {item.media_url && (
+              {/* If no content but has media */}
+              {!item.content && item.media_url && (
+                <div className="flex items-center gap-2">
+                  {isImage && <ImageIcon className="h-4 w-4 text-gray-400" />}
+                  {isVideo && <Video className="h-4 w-4 text-gray-400" />}
+                  <span className="text-xs text-gray-500">
+                    {isImage ? 'Shared an image' : isVideo ? 'Shared a video' : 'Shared media'}
+                  </span>
+                </div>
+              )}
+              
+              {/* Media indicator */}
+              {item.media_url && item.content && (
                 <div className="mt-2 flex items-center gap-1">
                   {isImage && <ImageIcon className="h-3 w-3 text-gray-400" />}
                   {isVideo && <Video className="h-3 w-3 text-gray-400" />}
@@ -189,7 +208,7 @@ export default function UnifiedCard({
         </div>
       </Link>
 
-      {/* Media Preview (Feed only) */}
+      {/* Full Media Preview (Feed only - below the content) */}
       {isFeed && item.media_url && (
         <div className="mx-3 xs:mx-4 mb-3">
           <div className="rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
@@ -283,4 +302,4 @@ export default function UnifiedCard({
       </div>
     </article>
   )
-  }
+}
