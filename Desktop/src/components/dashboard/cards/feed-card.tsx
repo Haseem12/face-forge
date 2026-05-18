@@ -1,18 +1,17 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import Link from 'next/link'
 import Image from 'next/image'
+import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
 import { 
-  Heart, MessageCircle, Share2, MoreHorizontal, 
-  Bookmark, Send, Smile, Image as ImageIcon, 
-  Video, X, Trash2, Flag, Copy, UserPlus, UserMinus,
-  Volume2, VolumeX, Play, Pause
+  Heart, MessageCircle, Share2, MoreHorizontal, Send, 
+  Smile, X, Loader2, Check, ThumbsUp, MapPin, Flag, Bookmark,
+  Edit2, Trash2
 } from 'lucide-react'
-import AvatarCircle from '@/components/dashboard/shared/avatar-circle'
 import { timeAgo } from '@/lib/dashboard/helpers'
 
-export interface FeedPost {
+interface FeedPost {
   id: string
   user_id: string
   content: string
@@ -23,10 +22,25 @@ export interface FeedPost {
   tags?: string[]
   feeling?: string
   feeling_emoji?: string
-  created_at: string
+  location?: string
   likes_count: number
   comments_count: number
   shares_count: number
+  created_at: string
+  profiles?: {
+    id: string
+    username: string
+    display_name: string
+    avatar_url: string
+  }
+}
+
+interface Comment {
+  id: string
+  content: string
+  user_id: string
+  created_at: string
+  likes_count: number
   profiles?: {
     id: string
     username: string
@@ -45,9 +59,6 @@ export default function FeedCard({
   onLike,
   onComment,
   onShare,
-  onDelete,
-  onEdit,
-  onReport,
   onTagClick,
 }: {
   post: FeedPost
@@ -59,163 +70,323 @@ export default function FeedCard({
   onLike: () => void
   onComment: () => void
   onShare: () => void
-  onDelete?: () => void
-  onEdit?: () => void
-  onReport?: () => void
   onTagClick?: (tag: string) => void
 }) {
+  const supabase = createClient()
+  const creator = post.profiles
+  const isOwner = currentUserId === post.user_id
+  const contentLength = post.content?.length || 0
+  const shouldTruncate = contentLength > 200
+  const [showFullContent, setShowFullContent] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showComments, setShowComments] = useState(false)
+  const [comments, setComments] = useState<Comment[]>([])
   const [commentText, setCommentText] = useState('')
-  const [isLiking, setIsLiking] = useState(false)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [isMuted, setIsMuted] = useState(true)
-  const [videoProgress, setVideoProgress] = useState(0)
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const [loadingComments, setLoadingComments] = useState(false)
+  const [submittingComment, setSubmittingComment] = useState(false)
+  const [likedComments, setLikedComments] = useState<Set<string>>(new Set())
+  const [showShareMenu, setShowShareMenu] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [localCommentCount, setLocalCommentCount] = useState(commentCount)
+  const [localLikesCount, setLocalLikesCount] = useState(post.likes_count || 0)
+  const [localIsLiked, setLocalIsLiked] = useState(isLiked)
+  const [currentUserAvatar, setCurrentUserAvatar] = useState('')
+  const [currentUserDisplayName, setCurrentUserDisplayName] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
-  
-  const creator = post.profiles
-  const isImage = post.media_type === 'image'
-  const isVideo = post.media_type === 'video'
-  const tags = post.tags || []
-  const isOwnPost = currentUserId === post.user_id
+  const shareRef = useRef<HTMLDivElement>(null)
+  const commentInputRef = useRef<HTMLInputElement>(null)
+  const postContentRef = useRef<HTMLDivElement>(null)
 
+  const displayContent = shouldTruncate && !showFullContent 
+    ? post.content?.slice(0, 200) + '...' 
+    : post.content
+
+  // Fetch current user's avatar and display name
+  useEffect(() => {
+    const getCurrentUserInfo = async () => {
+      if (currentUserId) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('avatar_url, display_name')
+          .eq('id', currentUserId)
+          .single()
+        if (data) {
+          setCurrentUserAvatar(data.avatar_url || '')
+          setCurrentUserDisplayName(data.display_name || 'User')
+        }
+      }
+    }
+    getCurrentUserInfo()
+  }, [currentUserId, supabase])
+
+  // Load comments
+  const loadComments = async () => {
+    if (!post.id) return
+    setLoadingComments(true)
+    try {
+      const { data, error } = await supabase
+        .from('post_comments')
+        .select(`
+          *,
+          profiles:user_id (
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .eq('post_id', post.id)
+        .order('created_at', { ascending: true })
+      
+      if (error) throw error
+      setComments(data || [])
+      
+      // Load liked comments
+      if (currentUserId && data?.length) {
+        const commentIds = data.map(c => c.id)
+        const { data: likedData } = await supabase
+          .from('comment_likes')
+          .select('comment_id')
+          .eq('user_id', currentUserId)
+          .in('comment_id', commentIds)
+        setLikedComments(new Set(likedData?.map(l => l.comment_id) || []))
+      }
+    } catch (error) {
+      console.error('Error loading comments:', error)
+    } finally {
+      setLoadingComments(false)
+    }
+  }
+
+  // Handle comment like
+  const handleCommentLike = async (commentId: string) => {
+    const isLiked = likedComments.has(commentId)
+    
+    if (isLiked) {
+      await supabase
+        .from('comment_likes')
+        .delete()
+        .eq('comment_id', commentId)
+        .eq('user_id', currentUserId)
+      setLikedComments(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(commentId)
+        return newSet
+      })
+      setComments(prev => prev.map(c => 
+        c.id === commentId ? { ...c, likes_count: (c.likes_count || 0) - 1 } : c
+      ))
+    } else {
+      await supabase
+        .from('comment_likes')
+        .insert({ comment_id: commentId, user_id: currentUserId })
+      setLikedComments(prev => new Set(prev).add(commentId))
+      setComments(prev => prev.map(c => 
+        c.id === commentId ? { ...c, likes_count: (c.likes_count || 0) + 1 } : c
+      ))
+    }
+  }
+
+  // Handle submit comment
+  const handleSubmitComment = async () => {
+    if (!commentText.trim() || !post.id) return
+    
+    setSubmittingComment(true)
+    try {
+      const { data, error } = await supabase
+        .from('post_comments')
+        .insert({
+          post_id: post.id,
+          user_id: currentUserId,
+          content: commentText.trim()
+        })
+        .select(`
+          *,
+          profiles:user_id (
+            id,
+            username,
+            display_name,
+            avatar_url
+          )
+        `)
+        .single()
+      
+      if (error) throw error
+      
+      if (data) {
+        setComments(prev => [...prev, data])
+        setCommentText('')
+        setLocalCommentCount(prev => prev + 1)
+      }
+    } catch (error) {
+      console.error('Error posting comment:', error)
+    } finally {
+      setSubmittingComment(false)
+    }
+  }
+
+  // Handle share with count increment
+  const handleSharePost = async () => {
+    const shareUrl = `${window.location.origin}/post/${post.id}`
+    await navigator.clipboard.writeText(shareUrl)
+    setShareCopied(true)
+    setTimeout(() => setShareCopied(false), 2000)
+    
+    // Increment share count in database
+    await supabase
+      .from('user_feeds')
+      .update({ shares_count: (post.shares_count || 0) + 1 })
+      .eq('id', post.id)
+    
+    setShowShareMenu(false)
+    onShare()
+  }
+
+  // Handle like with optimistic update
+  const handleLikeClick = async () => {
+    const newLikedState = !localIsLiked
+    setLocalIsLiked(newLikedState)
+    setLocalLikesCount(prev => newLikedState ? prev + 1 : prev - 1)
+    
+    if (newLikedState) {
+      await supabase
+        .from('post_likes')
+        .insert({ post_id: post.id, user_id: currentUserId })
+    } else {
+      await supabase
+        .from('post_likes')
+        .delete()
+        .eq('post_id', post.id)
+        .eq('user_id', currentUserId)
+    }
+    
+    onLike()
+  }
+
+  // Handle delete post
+  const handleDeletePost = async () => {
+    if (!confirm('Are you sure you want to delete this post?')) return
+    
+    const { error } = await supabase
+      .from('user_feeds')
+      .delete()
+      .eq('id', post.id)
+    
+    if (!error) {
+      window.location.reload()
+    }
+  }
+
+  // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowMenu(false)
+      }
+      if (shareRef.current && !shareRef.current.contains(e.target as Node)) {
+        setShowShareMenu(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const handleLikeWithFeedback = () => {
-    setIsLiking(true)
-    onLike()
-    setTimeout(() => setIsLiking(false), 300)
+  // Touch handlers for mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const target = e.currentTarget as HTMLElement
+    target.style.transform = 'scale(0.98)'
   }
 
-  const handleCommentSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (commentText.trim()) {
-      onComment()
-      setCommentText('')
-      setShowComments(false)
-    }
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const target = e.currentTarget as HTMLElement
+    target.style.transform = 'scale(1)'
   }
 
-  const toggleVideoPlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause()
-      } else {
-        videoRef.current.play()
-      }
-      setIsPlaying(!isPlaying)
-    }
-  }
-
-  const toggleMute = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted
-      setIsMuted(!isMuted)
-    }
-  }
-
-  const handleVideoTimeUpdate = () => {
-    if (videoRef.current) {
-      const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100
-      setVideoProgress(progress)
-    }
-  }
-
-  if (!creator) return null
+  const tags = post.tags || []
 
   return (
-    <article className="bg-white border border-gray-200 w-full max-w-2xl mx-auto mb-4">
+    <article className="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4 w-full max-w-2xl mx-auto transition-all duration-200">
       
-      {/* Header - Profile, Name, @, Emotion, Time */}
-      <div className="px-4 pt-4 pb-2 flex items-start justify-between">
-        <div className="flex items-start gap-3">
-          <Link href={`/profile/${creator.username}`}>
-            <AvatarCircle src={creator.avatar_url} name={creator.display_name} size={40} />
+      {/* ========== HEADER ========== */}
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Link href={`/profile/${creator?.username}`}>
+            <div className="relative">
+              {creator?.avatar_url ? (
+                <Image 
+                  src={creator.avatar_url} 
+                  alt="" 
+                  width={40} 
+                  height={40} 
+                  className="rounded-full object-cover cursor-pointer hover:opacity-90 transition" 
+                  unoptimized 
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-white font-bold">
+                  {creator?.display_name?.[0]?.toUpperCase() || 'U'}
+                </div>
+              )}
+              {/* Online indicator */}
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
+            </div>
           </Link>
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Link href={`/profile/${creator.username}`}>
-                <span className="font-semibold text-gray-900 hover:underline text-[15px]">
-                  {creator.display_name}
-                </span>
-              </Link>
-              <Link href={`/profile/${creator.username}`}>
-                <span className="text-gray-500 text-[13px]">@{creator.username}</span>
-              </Link>
-              <span className="text-gray-400 text-[13px]">·</span>
-              <span className="text-gray-400 text-[13px]">{timeAgo(post.created_at)}</span>
+            <Link href={`/profile/${creator?.username}`}>
+              <p className="font-semibold text-gray-900 hover:underline text-sm">
+                {creator?.display_name}
+              </p>
+            </Link>
+            <div className="flex items-center gap-1 text-xs text-gray-400">
+              <span>{timeAgo(post.created_at)}</span>
+              {post.location && (
+                <>
+                  <span>•</span>
+                  <MapPin className="h-3 w-3" />
+                  <span className="truncate max-w-[100px]">{post.location}</span>
+                </>
+              )}
+              <span>•</span>
+              <span>🌐</span>
             </div>
-            
-            {/* Emotion/Feeling */}
-            {post.feeling && (
-              <div className="flex items-center gap-1 mt-0.5">
-                <span className="text-sm">{post.feeling_emoji || '😊'}</span>
-                <span className="text-xs text-gray-500">feeling {post.feeling}</span>
-              </div>
-            )}
           </div>
         </div>
         
-        {/* Three dots menu */}
+        {/* Menu Button */}
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="p-2 hover:bg-gray-100 transition-colors"
+            className="p-2 rounded-full hover:bg-gray-100 transition active:scale-95"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
           >
             <MoreHorizontal className="h-5 w-5 text-gray-500" />
           </button>
-          
           {showMenu && (
-            <div className="absolute right-0 mt-1 w-56 bg-white shadow-lg border border-gray-200 z-20">
-              {isOwnPost ? (
+            <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-10 animate-fade-in">
+              {isOwner ? (
                 <>
-                  <button 
-                    onClick={() => { onEdit?.(); setShowMenu(false); }}
-                    className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
-                  >
-                    <Copy className="h-4 w-4 text-gray-500" />
-                    Edit post
+                  <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                    <Edit2 className="h-4 w-4" />
+                    Edit Post
                   </button>
                   <button 
-                    onClick={() => { onDelete?.(); setShowMenu(false); }}
-                    className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 border-t border-gray-100"
+                    onClick={handleDeletePost}
+                    className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition"
                   >
-                    <Trash2 className="h-4 w-4 text-red-500" />
-                    Delete post
+                    <Trash2 className="h-4 w-4" />
+                    Delete Post
                   </button>
                 </>
               ) : (
                 <>
-                  <button 
-                    onClick={() => { onReport?.(); setShowMenu(false); }}
-                    className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
-                  >
-                    <Flag className="h-4 w-4 text-gray-500" />
-                    Report post
+                  <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                    <Bookmark className="h-4 w-4" />
+                    Save Post
                   </button>
-                  <button 
-                    onClick={() => { onFollow(); setShowMenu(false); }}
-                    className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 border-t border-gray-100"
-                  >
-                    {isFollowing ? (
-                      <><UserMinus className="h-4 w-4 text-gray-500" /> Unfollow {creator.display_name}</>
-                    ) : (
-                      <><UserPlus className="h-4 w-4 text-gray-500" /> Follow {creator.display_name}</>
-                    )}
-                  </button>
-                  <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
-                    <Copy className="h-4 w-4 text-gray-500" />
-                    Copy link
+                  <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                    <Flag className="h-4 w-4" />
+                    Report
                   </button>
                 </>
               )}
@@ -224,81 +395,45 @@ export default function FeedCard({
         </div>
       </div>
 
-      {/* Content / Writeup */}
-      <div className="px-4 pb-3">
-        {post.title && (
-          <h3 className="font-bold text-gray-900 text-[17px] mb-1">{post.title}</h3>
-        )}
-        <p className="text-gray-800 text-[15px] leading-relaxed whitespace-pre-wrap break-words">
-          {post.content}
-        </p>
-      </div>
-
-      {/* Media - Image or Video (No "media attached" text) */}
-      {post.media_url && (
-        <div className="mb-3">
-          {isImage ? (
-            <img
-              src={post.media_url}
-              alt={post.title || "Post image"}
-              className="w-full"
-            />
-          ) : isVideo && (
-            <div className="relative bg-black">
-              <video
-                ref={videoRef}
-                src={post.media_url}
-                className="w-full cursor-pointer"
-                onClick={toggleVideoPlay}
-                onTimeUpdate={handleVideoTimeUpdate}
-                playsInline
-              />
-              
-              {/* Video controls overlay */}
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3 opacity-0 hover:opacity-100 transition-opacity">
-                {/* Progress bar */}
-                <div className="w-full h-1 bg-white/30 rounded-full mb-2 cursor-pointer">
-                  <div 
-                    className="h-full bg-white rounded-full"
-                    style={{ width: `${videoProgress}%` }}
-                  />
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={toggleVideoPlay}
-                    className="text-white hover:text-gray-300 transition"
-                  >
-                    {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-                  </button>
-                  
-                  <button
-                    onClick={toggleMute}
-                    className="text-white hover:text-gray-300 transition"
-                  >
-                    {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-                  </button>
-                  
-                  <span className="text-white text-xs">
-                    {videoRef.current ? 
-                      `${Math.floor(videoRef.current.currentTime)}s / ${Math.floor(videoRef.current.duration)}s` : 
-                      '0s / 0s'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
+      {/* ========== FEELING ========== */}
+      {post.feeling && (
+        <div className="px-4 mb-2">
+          <span className="text-sm text-gray-500">
+            is feeling <span className="font-medium">{post.feeling}</span> {post.feeling_emoji}
+          </span>
         </div>
       )}
 
-      {/* Tags */}
+      {/* ========== CONTENT ========== */}
+      <div className="px-4 mb-3" ref={postContentRef}>
+        {post.title && (
+          <h3 className="text-lg font-bold text-gray-900 mb-2">{post.title}</h3>
+        )}
+        <p className="text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
+          {displayContent}
+        </p>
+        {shouldTruncate && (
+          <button
+            onClick={() => setShowFullContent(!showFullContent)}
+            className="text-sm text-gray-400 hover:text-gray-600 font-medium mt-1 active:text-orange-500"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
+            {showFullContent ? 'See less' : 'See more'}
+          </button>
+        )}
+      </div>
+
+      {/* ========== TAGS ========== */}
       {tags.length > 0 && (
-        <div className="px-4 pb-2 flex flex-wrap gap-1.5">
+        <div className="px-4 mb-3 flex flex-wrap gap-1.5">
           {tags.map((tag) => (
             <button
               key={tag}
               onClick={() => onTagClick?.(tag)}
-              className="text-[13px] text-blue-500 hover:text-blue-600 hover:underline"
+              className="text-xs text-orange-500 hover:text-orange-600 hover:underline transition active:scale-95"
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
             >
               #{tag}
             </button>
@@ -306,89 +441,239 @@ export default function FeedCard({
         </div>
       )}
 
-      {/* Stats row - Likes and Comments */}
-      <div className="px-4 py-2 border-t border-gray-100">
-        <div className="flex items-center justify-between text-[13px] text-gray-500">
-          <div className="flex items-center gap-1">
-            <Heart className={`h-4 w-4 ${isLiked ? 'fill-red-500 text-red-500' : ''}`} />
-            <span>{post.likes_count || 0}</span>
+      {/* ========== MEDIA ========== */}
+      {post.media_url && (
+        <div className="mb-2">
+          <div className="relative bg-gray-100">
+            {post.media_type === 'image' ? (
+              <img
+                src={post.media_url}
+                alt="Post"
+                className="w-full max-h-[500px] object-contain cursor-pointer hover:opacity-95 transition"
+                onClick={() => window.open(post.media_url, '_blank')}
+              />
+            ) : post.media_type === 'video' ? (
+              <video
+                src={post.media_url}
+                controls
+                className="w-full max-h-[500px] object-contain"
+                poster="/video-placeholder.jpg"
+              />
+            ) : null}
           </div>
-          <div className="flex gap-4">
-            <button onClick={() => setShowComments(!showComments)} className="hover:text-blue-500">
-              {commentCount || 0} comments
-            </button>
-            <button>{post.shares_count || 0} shares</button>
+        </div>
+      )}
+
+      {/* ========== STATS ========== */}
+      <div className="px-4 py-2 flex items-center justify-between text-xs text-gray-400 border-b border-gray-100">
+        <div className="flex items-center gap-1">
+          <div className="flex -space-x-1">
+            <ThumbsUp className="h-3 w-3 fill-blue-500 text-blue-500" />
+            <Heart className="h-3 w-3 fill-red-500 text-red-500 -ml-1" />
           </div>
+          <span>{localLikesCount}</span>
+        </div>
+        <div className="flex gap-3">
+          <button 
+            onClick={() => {
+              setShowComments(!showComments)
+              if (!showComments && comments.length === 0) loadComments()
+              setTimeout(() => commentInputRef.current?.focus(), 100)
+            }}
+            className="hover:text-gray-600 transition"
+          >
+            {localCommentCount} comments
+          </button>
+          <button 
+            onClick={() => setShowShareMenu(!showShareMenu)}
+            className="hover:text-gray-600 transition"
+          >
+            {post.shares_count || 0} shares
+          </button>
         </div>
       </div>
 
-      {/* Interaction Buttons */}
-      <div className="flex border-t border-gray-100">
+      {/* ========== ACTION BUTTONS ========== */}
+      <div className="flex items-center justify-around py-1">
         <button
-          onClick={handleLikeWithFeedback}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
-            isLiked ? 'text-red-500' : 'text-gray-500 hover:text-red-500 hover:bg-red-50'
+          onClick={handleLikeClick}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition active:scale-95 ${
+            localIsLiked ? 'text-blue-500 bg-blue-50' : 'text-gray-500 hover:bg-gray-100'
           }`}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
         >
-          <Heart className={`h-5 w-5 ${isLiked ? 'fill-red-500' : ''} ${isLiking ? 'scale-125' : ''} transition-transform`} />
-          Like
+          {localIsLiked ? (
+            <ThumbsUp className="h-5 w-5 fill-blue-500" />
+          ) : (
+            <ThumbsUp className="h-5 w-5" />
+          )}
+          <span className={localIsLiked ? 'text-blue-500' : ''}>Like</span>
         </button>
-        
+
         <button
-          onClick={() => setShowComments(!showComments)}
-          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium text-gray-500 hover:text-blue-500 hover:bg-blue-50"
+          onClick={() => {
+            setShowComments(!showComments)
+            if (!showComments && comments.length === 0) loadComments()
+            setTimeout(() => commentInputRef.current?.focus(), 100)
+          }}
+          className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold text-gray-500 hover:bg-gray-100 transition active:scale-95"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
         >
           <MessageCircle className="h-5 w-5" />
           Comment
         </button>
-        
-        <button
-          onClick={onShare}
-          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium text-gray-500 hover:text-green-500 hover:bg-green-50"
-        >
-          <Share2 className="h-5 w-5" />
-          Share
-        </button>
+
+        <div className="relative flex-1" ref={shareRef}>
+          <button
+            onClick={() => setShowShareMenu(!showShareMenu)}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold text-gray-500 hover:bg-gray-100 transition active:scale-95"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
+            <Share2 className="h-5 w-5" />
+            Share
+          </button>
+          {showShareMenu && (
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-10 animate-slide-up">
+              <button
+                onClick={handleSharePost}
+                className="w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition"
+              >
+                {shareCopied ? (
+                  <Check className="h-4 w-4 text-green-500" />
+                ) : (
+                  <Share2 className="h-4 w-4" />
+                )}
+                {shareCopied ? 'Copied!' : 'Copy link'}
+              </button>
+              <button className="w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                Share to Feed
+              </button>
+              <button className="w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
+                Share to Messenger
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Follow button (if not own post) */}
-      {!isOwnPost && (
-        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
-          <button
-            onClick={onFollow}
-            className={`w-full py-2 text-sm font-semibold transition-colors ${
-              isFollowing
-                ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                : 'bg-black text-white hover:bg-gray-800'
-            }`}
-          >
-            {isFollowing ? '✓ Following' : '+ Follow'}
-          </button>
-        </div>
-      )}
-
-      {/* Comments section */}
+      {/* ========== COMMENTS SECTION ========== */}
       {showComments && (
-        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
-          <form onSubmit={handleCommentSubmit} className="flex gap-2">
-            <AvatarCircle src={creator.avatar_url} name={creator.display_name} size={32} />
-            <div className="flex-1 relative">
+        <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 rounded-b-2xl">
+          {/* Comment Input */}
+          <div className="flex items-center gap-2 mb-3">
+            {currentUserId && (
+              <Image
+                src={currentUserAvatar || '/default-avatar.png'}
+                alt=""
+                width={32}
+                height={32}
+                className="rounded-full object-cover"
+                unoptimized
+              />
+            )}
+            <div className="flex-1 flex items-center bg-white rounded-full border border-gray-200 px-3 py-1 focus-within:border-orange-300 focus-within:ring-2 focus-within:ring-orange-100 transition">
               <input
+                ref={commentInputRef}
                 type="text"
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Write a comment..."
-                className="w-full px-3 py-2 bg-white border border-gray-300 text-sm focus:outline-none focus:border-gray-500"
+                onKeyPress={(e) => e.key === 'Enter' && handleSubmitComment()}
+                placeholder={`Write a comment as ${currentUserDisplayName || 'User'}...`}
+                className="flex-1 bg-transparent outline-none text-sm py-2"
               />
-            </div>
-            {commentText.trim() && (
-              <button type="submit" className="text-black font-semibold text-sm">
-                Post
+              <button
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                className="p-1 text-gray-400 hover:text-gray-600 transition"
+              >
+                <Smile className="h-5 w-5" />
               </button>
+              {commentText && (
+                <button
+                  onClick={handleSubmitComment}
+                  disabled={submittingComment}
+                  className="ml-1 p-1 text-orange-500 hover:text-orange-600 transition"
+                >
+                  {submittingComment ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Comments List */}
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {loadingComments && (
+              <div className="flex justify-center py-4">
+                <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+              </div>
             )}
-          </form>
+            {comments.map((comment) => (
+              <div key={comment.id} className="flex gap-2">
+                {comment.profiles?.avatar_url ? (
+                  <Image 
+                    src={comment.profiles.avatar_url} 
+                    alt="" 
+                    width={28} 
+                    height={28} 
+                    className="rounded-full object-cover" 
+                    unoptimized 
+                  />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center text-white text-xs font-bold">
+                    {comment.profiles?.display_name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+                <div className="flex-1">
+                  <div className="bg-gray-100 rounded-2xl px-3 py-2">
+                    <Link href={`/profile/${comment.profiles?.username}`}>
+                      <p className="text-xs font-semibold text-gray-900 hover:underline">
+                        {comment.profiles?.display_name}
+                      </p>
+                    </Link>
+                    <p className="text-sm text-gray-700">{comment.content}</p>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 ml-2">
+                    <button
+                      onClick={() => handleCommentLike(comment.id)}
+                      className="text-xs text-gray-400 hover:text-gray-600 font-medium transition active:scale-95"
+                    >
+                      {likedComments.has(comment.id) ? 'Liked' : 'Like'}
+                    </button>
+                    <button className="text-xs text-gray-400 hover:text-gray-600 font-medium transition active:scale-95">
+                      Reply
+                    </button>
+                    <span className="text-xs text-gray-400">{timeAgo(comment.created_at)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {comments.length === 0 && !loadingComments && (
+              <div className="text-center py-4 text-gray-400 text-sm">
+                No comments yet. Be the first to comment!
+              </div>
+            )}
+          </div>
         </div>
       )}
+
+      <style jsx global>{`
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(-5px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slide-up {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fade-in 0.2s ease-out; }
+        .animate-slide-up { animation: slide-up 0.2s ease-out; }
+      `}</style>
     </article>
   )
 }
