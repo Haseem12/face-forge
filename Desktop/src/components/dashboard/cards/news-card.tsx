@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { Heart, Share2, Check, ExternalLink, MoreHorizontal, Copy, Download, Eye, MessageCircle } from 'lucide-react'
+import { Heart, Share2, Check, ExternalLink, MoreHorizontal, Copy, Download, Eye, MessageCircle, X } from 'lucide-react'
 import { timeAgo } from '@/lib/dashboard/helpers'
 import { getArticleImage } from '@/lib/dashboard/image-helper'
 import { createClient } from '@/lib/supabase/client'
@@ -49,6 +49,14 @@ export default function NewsCard({
   const [showCommentDrawer, setShowCommentDrawer] = useState(false)
   const [localCommentCount, setLocalCommentCount] = useState(commentCount || 0)
   
+  // Long press menu state
+  const [showLongPressMenu, setShowLongPressMenu] = useState(false)
+  const [longPressPosition, setLongPressPosition] = useState({ x: 0, y: 0 })
+  const [longPressDownloading, setLongPressDownloading] = useState(false)
+  const [longPressCopied, setLongPressCopied] = useState(false)
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null)
+  const imageContainerRef = useRef<HTMLDivElement>(null)
+  
   const menuRef = useRef<HTMLDivElement>(null)
 
   const title = article.caption || article.title || "Untitled"
@@ -82,13 +90,120 @@ export default function NewsCard({
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowImageMenu(false)
+        setShowLongPressMenu(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Copy image to clipboard
+  // ========== LONG PRESS HANDLERS ==========
+  
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0]
+    setLongPressPosition({ x: touch.clientX, y: touch.clientY })
+    
+    longPressTimer.current = setTimeout(() => {
+      setShowLongPressMenu(true)
+    }, 500) // 500ms long press
+  }
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setLongPressPosition({ x: e.clientX, y: e.clientY })
+    
+    longPressTimer.current = setTimeout(() => {
+      setShowLongPressMenu(true)
+    }, 500)
+  }
+
+  const handleMouseUp = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
+
+  // Download image via long press
+  const handleLongPressDownload = async () => {
+    if (!imageUrl || imageUrl.startsWith('data:')) return
+    
+    setLongPressDownloading(true)
+    try {
+      const response = await fetch(imageUrl)
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `news-${Date.now()}.jpg`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      
+      setShowLongPressMenu(false)
+    } catch (error) {
+      console.error('Download failed:', error)
+    } finally {
+      setLongPressDownloading(false)
+    }
+  }
+
+  // Copy image via long press
+  const handleLongPressCopy = async () => {
+    if (!imageUrl || imageUrl.startsWith('data:')) return
+    
+    try {
+      const response = await fetch(imageUrl)
+      const blob = await response.blob()
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [blob.type]: blob
+        })
+      ])
+      setLongPressCopied(true)
+      setTimeout(() => setLongPressCopied(false), 2000)
+      setTimeout(() => setShowLongPressMenu(false), 500)
+    } catch (error) {
+      console.error('Copy failed:', error)
+    }
+  }
+
+  // Share image via long press
+  const handleLongPressShare = async () => {
+    if (!imageUrl || imageUrl.startsWith('data:')) return
+    
+    try {
+      const response = await fetch(imageUrl)
+      const blob = await response.blob()
+      const file = new File([blob], `news-${Date.now()}.jpg`, { type: blob.type })
+      
+      if (navigator.share) {
+        await navigator.share({
+          title: article.title,
+          text: 'Check out this news image',
+          files: [file]
+        })
+      } else {
+        // Fallback: copy link
+        await navigator.clipboard.writeText(imageUrl)
+        setLongPressCopied(true)
+        setTimeout(() => setLongPressCopied(false), 2000)
+      }
+      setShowLongPressMenu(false)
+    } catch (error) {
+      console.error('Share failed:', error)
+    }
+  }
+
+  // Copy image to clipboard (existing three-dots menu)
   const handleCopyImage = async () => {
     if (imageUrl && !imageUrl.startsWith('data:')) {
       try {
@@ -108,7 +223,7 @@ export default function NewsCard({
     }
   }
 
-  // Download image
+  // Download image (existing three-dots menu)
   const handleDownloadImage = () => {
     if (imageUrl && !imageUrl.startsWith('data:')) {
       const link = document.createElement('a')
@@ -126,8 +241,19 @@ export default function NewsCard({
   return (
     <>
       <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden transition-all duration-200 hover:shadow-md w-full group">
-        {/* Top Section: Large Image */}
-        <div className="relative w-full h-48 xs:h-52 sm:h-56 bg-gray-50">
+        {/* Top Section: Large Image with Long Press Support */}
+        <div 
+          ref={imageContainerRef}
+          className="relative w-full h-48 xs:h-52 sm:h-56 bg-gray-50"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleMouseUp}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            handleLongPressDownload()
+          }}
+        >
           {imageLoading ? (
             <div className="absolute inset-0 bg-gray-200 animate-pulse" />
           ) : imageUrl ? (
@@ -155,6 +281,15 @@ export default function NewsCard({
               <div className="text-center">
                 <div className="text-4xl mb-2">📰</div>
                 <p className="text-gray-500 text-sm">News image</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Long Press Hint (appears briefly) */}
+          {showLongPressMenu && (
+            <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-10">
+              <div className="bg-white rounded-xl shadow-xl p-2 animate-pulse">
+                <p className="text-xs text-gray-500">Release to save</p>
               </div>
             </div>
           )}
@@ -276,6 +411,57 @@ export default function NewsCard({
         </div>
       </article>
 
+      {/* Long Press Context Menu */}
+      {showLongPressMenu && imageUrl && !imageUrl.startsWith('data:') && (
+        <div 
+          className="fixed z-50 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden animate-fade-in"
+          style={{ 
+            top: Math.min(longPressPosition.y, window.innerHeight - 200),
+            left: Math.min(longPressPosition.x, window.innerWidth - 180),
+            transform: 'translate(-50%, -50%)'
+          }}
+        >
+          <div className="py-1">
+            <button
+              onClick={handleLongPressDownload}
+              disabled={longPressDownloading}
+              className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 min-w-[160px]"
+            >
+              <Download className="h-4 w-4" />
+              {longPressDownloading ? 'Downloading...' : 'Save Image'}
+            </button>
+            
+            <button
+              onClick={handleLongPressCopy}
+              className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+            >
+              <Copy className="h-4 w-4" />
+              {longPressCopied ? 'Copied!' : 'Copy Image'}
+            </button>
+            
+            {typeof navigator.share === 'function' && (
+              <button
+                onClick={handleLongPressShare}
+                className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+              >
+                <Share2 className="h-4 w-4" />
+                Share
+              </button>
+            )}
+            
+            <div className="border-t border-gray-100 my-1" />
+            
+            <button
+              onClick={() => setShowLongPressMenu(false)}
+              className="w-full px-4 py-2.5 text-left text-sm text-gray-500 hover:bg-gray-50 flex items-center gap-3"
+            >
+              <X className="h-4 w-4" />
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Comment Drawer */}
       <CommentDrawer
         isOpen={showCommentDrawer}
@@ -288,10 +474,10 @@ export default function NewsCard({
 
       <style jsx global>{`
         @keyframes fade-in {
-          from { opacity: 0; transform: translateY(-5px); }
-          to { opacity: 1; transform: translateY(0); }
+          from { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
+          to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         }
-        .animate-fade-in { animation: fade-in 0.2s ease-out; }
+        .animate-fade-in { animation: fade-in 0.1s ease-out; }
       `}</style>
     </>
   )
