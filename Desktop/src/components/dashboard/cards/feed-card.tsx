@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { 
   Heart, MessageCircle, Share2, MoreHorizontal, Send, 
-  Smile, X, Loader2, Check, ThumbsUp, MapPin, Flag, Bookmark,
+  Smile, Loader2, Check, ThumbsUp, MapPin, Flag, Bookmark,
   Edit2, Trash2, Volume2, VolumeX
 } from 'lucide-react'
 import { timeAgo } from '@/lib/dashboard/helpers'
@@ -27,20 +27,6 @@ interface FeedPost {
   comments_count: number
   shares_count: number
   created_at: string
-  profiles?: {
-    id: string
-    username: string
-    display_name: string
-    avatar_url: string
-  }
-}
-
-interface Comment {
-  id: string
-  content: string
-  user_id: string
-  created_at: string
-  likes_count: number
   profiles?: {
     id: string
     username: string
@@ -73,38 +59,46 @@ export default function FeedCard({
   onTagClick?: (tag: string) => void
 }) {
   const supabase = createClient()
-  const creator = post.profiles
-  const isOwner = currentUserId === post.user_id
-  const contentLength = post.content?.length || 0
+  const creator = post?.profiles || null
+  const isOwner = currentUserId === post?.user_id
+  const contentLength = post?.content?.length || 0
   const shouldTruncate = contentLength > 200
   const [showFullContent, setShowFullContent] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showComments, setShowComments] = useState(false)
-  const [comments, setComments] = useState<Comment[]>([])
+  const [comments, setComments] = useState<any[]>([])
   const [commentText, setCommentText] = useState('')
   const [loadingComments, setLoadingComments] = useState(false)
   const [submittingComment, setSubmittingComment] = useState(false)
   const [likedComments, setLikedComments] = useState<Set<string>>(new Set())
   const [showShareMenu, setShowShareMenu] = useState(false)
   const [shareCopied, setShareCopied] = useState(false)
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  const [localCommentCount, setLocalCommentCount] = useState(commentCount)
-  const [localLikesCount, setLocalLikesCount] = useState(post.likes_count || 0)
-  const [localIsLiked, setLocalIsLiked] = useState(isLiked)
+  const [localCommentCount, setLocalCommentCount] = useState(commentCount || 0)
+  const [localLikesCount, setLocalLikesCount] = useState(post?.likes_count || 0)
+  const [localIsLiked, setLocalIsLiked] = useState(isLiked || false)
   const [currentUserAvatar, setCurrentUserAvatar] = useState('')
   const [currentUserDisplayName, setCurrentUserDisplayName] = useState('')
   const [videoMuted, setVideoMuted] = useState(true)
-  const [videoPlaying, setVideoPlaying] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const shareRef = useRef<HTMLDivElement>(null)
   const commentInputRef = useRef<HTMLInputElement>(null)
 
   const displayContent = shouldTruncate && !showFullContent 
-    ? post.content?.slice(0, 200) + '...' 
-    : post.content
+    ? post?.content?.slice(0, 200) + '...' 
+    : post?.content || ''
 
-  // Fetch current user's avatar and display name
+  // Debug logging
+  useEffect(() => {
+    console.log('FeedCard mounted with post:', {
+      id: post?.id,
+      userId: post?.user_id,
+      content: post?.content?.substring(0, 50),
+      likesCount: post?.likes_count
+    })
+  }, [post])
+
+  // Fetch current user's info
   useEffect(() => {
     const getCurrentUserInfo = async () => {
       if (currentUserId) {
@@ -122,31 +116,29 @@ export default function FeedCard({
     getCurrentUserInfo()
   }, [currentUserId, supabase])
 
-  // Auto-play video when in view
+  // Auto-play video
   useEffect(() => {
-    if (post.media_type === 'video' && videoRef.current) {
+    if (post?.media_type === 'video' && videoRef.current && post?.media_url) {
       const observer = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
             if (entry.isIntersecting) {
-              videoRef.current?.play()
-              setVideoPlaying(true)
+              videoRef.current?.play().catch(e => console.log('Video play error:', e))
             } else {
               videoRef.current?.pause()
-              setVideoPlaying(false)
             }
           })
         },
-        { threshold: 0.5 }
+        { threshold: 0.3 }
       )
       observer.observe(videoRef.current)
       return () => observer.disconnect()
     }
-  }, [post.media_type])
+  }, [post?.media_type, post?.media_url])
 
   // Load comments
   const loadComments = async () => {
-    if (!post.id) return
+    if (!post?.id) return
     setLoadingComments(true)
     try {
       const { data, error } = await supabase
@@ -166,7 +158,6 @@ export default function FeedCard({
       if (error) throw error
       setComments(data || [])
       
-      // Load liked comments
       if (currentUserId && data?.length) {
         const commentIds = data.map(c => c.id)
         const { data: likedData } = await supabase
@@ -214,7 +205,17 @@ export default function FeedCard({
 
   // Handle submit comment
   const handleSubmitComment = async () => {
-    if (!commentText.trim() || !post.id) return
+    if (!commentText.trim() || !post?.id) {
+      console.error('Missing comment text or post ID')
+      return
+    }
+    
+    if (!currentUserId) {
+      console.error('No user logged in')
+      return
+    }
+    
+    console.log('Submitting comment for post:', post.id)
     
     setSubmittingComment(true)
     try {
@@ -236,60 +237,128 @@ export default function FeedCard({
         `)
         .single()
       
-      if (error) throw error
+      if (error) {
+        console.error('Error posting comment:', error)
+        alert(`Failed to post comment: ${error.message}`)
+        return
+      }
+      
+      console.log('Comment posted successfully:', data)
       
       if (data) {
         setComments(prev => [...prev, data])
         setCommentText('')
         setLocalCommentCount(prev => prev + 1)
+        
+        // Update comment count in user_feeds
+        await supabase
+          .from('user_feeds')
+          .update({ comments_count: localCommentCount + 1 })
+          .eq('id', post.id)
       }
-    } catch (error) {
-      console.error('Error posting comment:', error)
+    } catch (err) {
+      console.error('Unexpected error:', err)
+      alert('Failed to post comment. Please try again.')
     } finally {
       setSubmittingComment(false)
     }
   }
 
-  // Handle share with count increment
+  // Handle share
   const handleSharePost = async () => {
-    const shareUrl = `${window.location.origin}/post/${post.id}`
+    const shareUrl = `${window.location.origin}/post/${post?.id}`
     await navigator.clipboard.writeText(shareUrl)
     setShareCopied(true)
     setTimeout(() => setShareCopied(false), 2000)
     
-    await supabase
-      .from('user_feeds')
-      .update({ shares_count: (post.shares_count || 0) + 1 })
-      .eq('id', post.id)
+    if (post?.id) {
+      await supabase
+        .from('user_feeds')
+        .update({ shares_count: (post.shares_count || 0) + 1 })
+        .eq('id', post.id)
+    }
     
     setShowShareMenu(false)
     onShare()
   }
 
-  // Handle like with optimistic update
+  // Handle like
   const handleLikeClick = async () => {
-    const newLikedState = !localIsLiked
-    setLocalIsLiked(newLikedState)
-    setLocalLikesCount(prev => newLikedState ? prev + 1 : prev - 1)
-    
-    if (newLikedState) {
-      await supabase
-        .from('post_likes')
-        .insert({ post_id: post.id, user_id: currentUserId })
-    } else {
-      await supabase
-        .from('post_likes')
-        .delete()
-        .eq('post_id', post.id)
-        .eq('user_id', currentUserId)
+    if (!post?.id) {
+      console.error('No post ID found')
+      return
     }
     
-    onLike()
+    if (!currentUserId) {
+      console.error('No user logged in')
+      return
+    }
+    
+    console.log('Attempting to like post:', post.id)
+    
+    const newLikedState = !localIsLiked
+    
+    try {
+      if (newLikedState) {
+        // Add like
+        const { data, error } = await supabase
+          .from('post_likes')
+          .insert({ 
+            post_id: post.id, 
+            user_id: currentUserId 
+          })
+          .select()
+        
+        if (error) {
+          console.error('Error adding like:', error)
+          alert(`Failed to like: ${error.message}`)
+          return
+        }
+        
+        console.log('Like added successfully:', data)
+        
+        // Update like count in user_feeds
+        await supabase
+          .from('user_feeds')
+          .update({ likes_count: localLikesCount + 1 })
+          .eq('id', post.id)
+          
+      } else {
+        // Remove like
+        const { error } = await supabase
+          .from('post_likes')
+          .delete()
+          .eq('post_id', post.id)
+          .eq('user_id', currentUserId)
+        
+        if (error) {
+          console.error('Error removing like:', error)
+          return
+        }
+        
+        console.log('Like removed successfully')
+        
+        // Update like count in user_feeds
+        await supabase
+          .from('user_feeds')
+          .update({ likes_count: localLikesCount - 1 })
+          .eq('id', post.id)
+      }
+      
+      // Update UI
+      setLocalIsLiked(newLikedState)
+      setLocalLikesCount(prev => newLikedState ? prev + 1 : prev - 1)
+      onLike()
+      
+    } catch (err) {
+      console.error('Unexpected error:', err)
+    }
   }
 
   // Handle delete post
   const handleDeletePost = async () => {
     if (!confirm('Are you sure you want to delete this post?')) return
+    if (!post?.id) return
     
     const { error } = await supabase
       .from('user_feeds')
@@ -310,7 +379,7 @@ export default function FeedCard({
     }
   }
 
-  // Close menus on outside click
+  // Close menus
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -324,7 +393,7 @@ export default function FeedCard({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Touch handlers for mobile
+  // Touch handlers
   const handleTouchStart = (e: React.TouchEvent) => {
     const target = e.currentTarget as HTMLElement
     target.style.transform = 'scale(0.98)'
@@ -335,16 +404,18 @@ export default function FeedCard({
     target.style.transform = 'scale(1)'
   }
 
-  const tags = post.tags || []
+  const tags = post?.tags || []
+
+  if (!post) return null
 
   return (
     <article className="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4 w-full max-w-2xl mx-auto transition-all duration-200 overflow-hidden">
       
-      {/* ========== HEADER ========== */}
+      {/* Header */}
       <div className="px-4 pt-3 pb-2">
-        <div className="flex items-center gap-3">
-          <Link href={`/profile/${creator?.username}`}>
-            <div className="relative">
+        <div className="flex items-start gap-3">
+          <Link href={`/profile/${creator?.username || '#'}`}>
+            <div className="relative flex-shrink-0">
               {creator?.avatar_url ? (
                 <Image 
                   src={creator.avatar_url} 
@@ -364,24 +435,23 @@ export default function FeedCard({
           </Link>
           
           <div className="flex-1 min-w-0">
-            <div className="flex items-center flex-wrap gap-1">
-              <Link href={`/profile/${creator?.username}`}>
-                <p className="font-semibold text-gray-900 hover:underline text-sm">
-                  {creator?.display_name}
+            <div className="flex flex-wrap items-center gap-1">
+              <Link href={`/profile/${creator?.username || '#'}`}>
+                <p className="font-semibold text-gray-900 hover:underline text-sm truncate">
+                  {creator?.display_name || 'User'}
                 </p>
               </Link>
               
-              {/* Feeling - small, next to username */}
               {post.feeling && (
-                <span className="text-xs text-gray-500 flex items-center gap-0.5">
+                <span className="text-xs text-gray-500 inline-flex items-center gap-0.5">
                   <span>is feeling</span>
                   <span className="font-medium text-gray-700">{post.feeling}</span>
-                  <span>{post.feeling_emoji}</span>
+                  <span>{post.feeling_emoji || '😊'}</span>
                 </span>
               )}
             </div>
             
-            <div className="flex items-center gap-1 text-xs text-gray-400">
+            <div className="flex items-center gap-1 text-xs text-gray-400 mt-0.5">
               <span>{timeAgo(post.created_at)}</span>
               {post.location && (
                 <>
@@ -406,16 +476,16 @@ export default function FeedCard({
               <MoreHorizontal className="h-5 w-5 text-gray-500" />
             </button>
             {showMenu && (
-              <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-10 animate-fade-in">
+              <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-10">
                 {isOwner ? (
                   <>
-                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                       <Edit2 className="h-4 w-4" />
                       Edit Post
                     </button>
                     <button 
                       onClick={handleDeletePost}
-                      className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition"
+                      className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3"
                     >
                       <Trash2 className="h-4 w-4" />
                       Delete Post
@@ -423,11 +493,11 @@ export default function FeedCard({
                   </>
                 ) : (
                   <>
-                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                       <Bookmark className="h-4 w-4" />
                       Save Post
                     </button>
-                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3">
                       <Flag className="h-4 w-4" />
                       Report
                     </button>
@@ -439,7 +509,7 @@ export default function FeedCard({
         </div>
       </div>
 
-      {/* ========== CONTENT ========== */}
+      {/* Content */}
       <div className="px-4 mb-3">
         {post.title && (
           <h3 className="text-lg font-bold text-gray-900 mb-2">{post.title}</h3>
@@ -450,25 +520,21 @@ export default function FeedCard({
         {shouldTruncate && (
           <button
             onClick={() => setShowFullContent(!showFullContent)}
-            className="text-sm text-gray-400 hover:text-gray-600 font-medium mt-1 active:text-orange-500"
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
+            className="text-sm text-gray-400 hover:text-gray-600 font-medium mt-1"
           >
             {showFullContent ? 'See less' : 'See more'}
           </button>
         )}
       </div>
 
-      {/* ========== TAGS ========== */}
+      {/* Tags */}
       {tags.length > 0 && (
         <div className="px-4 mb-3 flex flex-wrap gap-1.5">
           {tags.map((tag) => (
             <button
               key={tag}
               onClick={() => onTagClick?.(tag)}
-              className="text-xs text-orange-500 hover:text-orange-600 hover:underline transition active:scale-95"
-              onTouchStart={handleTouchStart}
-              onTouchEnd={handleTouchEnd}
+              className="text-xs text-orange-500 hover:text-orange-600 hover:underline transition"
             >
               #{tag}
             </button>
@@ -476,20 +542,18 @@ export default function FeedCard({
         </div>
       )}
 
-      {/* ========== MEDIA - Responsive Video ========== */}
+      {/* Media */}
       {post.media_url && (
         <div className="mb-2 bg-black/5">
           {post.media_type === 'image' ? (
-            <div className="relative">
-              <img
-                src={post.media_url}
-                alt="Post"
-                className="w-full max-h-[500px] object-contain cursor-pointer hover:opacity-95 transition"
-                onClick={() => window.open(post.media_url, '_blank')}
-              />
-            </div>
+            <img
+              src={post.media_url}
+              alt="Post"
+              className="w-full max-h-[500px] object-contain cursor-pointer hover:opacity-95 transition"
+              onClick={() => window.open(post.media_url, '_blank')}
+            />
           ) : post.media_type === 'video' ? (
-            <div className="relative w-full">
+            <div className="relative w-full max-h-[500px] flex items-center justify-center bg-black/10">
               <video
                 ref={videoRef}
                 src={post.media_url}
@@ -498,12 +562,10 @@ export default function FeedCard({
                 muted
                 loop
                 playsInline
-                poster="/video-placeholder.jpg"
               />
-              {/* Mute/Unmute button */}
               <button
                 onClick={toggleMute}
-                className="absolute bottom-3 right-3 p-2 bg-black/50 rounded-full text-white hover:bg-black/70 transition"
+                className="absolute bottom-3 right-3 p-2 bg-black/60 rounded-full text-white hover:bg-black/80 transition"
               >
                 {videoMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
               </button>
@@ -512,7 +574,7 @@ export default function FeedCard({
         </div>
       )}
 
-      {/* ========== STATS ========== */}
+      {/* Stats */}
       <div className="px-4 py-2 flex items-center justify-between text-xs text-gray-400 border-t border-gray-100">
         <div className="flex items-center gap-1">
           <div className="flex -space-x-1">
@@ -541,7 +603,7 @@ export default function FeedCard({
         </div>
       </div>
 
-      {/* ========== ACTION BUTTONS ========== */}
+      {/* Action Buttons */}
       <div className="flex items-center justify-around py-1 border-b border-gray-100">
         <button
           onClick={handleLikeClick}
@@ -556,7 +618,7 @@ export default function FeedCard({
           ) : (
             <ThumbsUp className="h-5 w-5" />
           )}
-          <span className={localIsLiked ? 'text-blue-500' : ''}>Like</span>
+          <span>Like</span>
         </button>
 
         <button
@@ -584,10 +646,10 @@ export default function FeedCard({
             Share
           </button>
           {showShareMenu && (
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-10 animate-slide-up">
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-10">
               <button
                 onClick={handleSharePost}
-                className="w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition"
+                className="w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
               >
                 {shareCopied ? (
                   <Check className="h-4 w-4 text-green-500" />
@@ -607,7 +669,7 @@ export default function FeedCard({
         </div>
       </div>
 
-      {/* ========== COMMENTS SECTION ========== */}
+      {/* Comments Section */}
       {showComments && (
         <div className="px-4 py-3 bg-gray-50">
           {/* Comment Input */}
@@ -632,10 +694,7 @@ export default function FeedCard({
                 placeholder={`Write a comment as ${currentUserDisplayName || 'User'}...`}
                 className="flex-1 bg-transparent outline-none text-sm py-2"
               />
-              <button
-                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                className="p-1 text-gray-400 hover:text-gray-600 transition"
-              >
+              <button className="p-1 text-gray-400 hover:text-gray-600 transition">
                 <Smile className="h-5 w-5" />
               </button>
               {commentText && (
@@ -679,7 +738,7 @@ export default function FeedCard({
                 )}
                 <div className="flex-1">
                   <div className="bg-gray-100 rounded-2xl px-3 py-2">
-                    <Link href={`/profile/${comment.profiles?.username}`}>
+                    <Link href={`/profile/${comment.profiles?.username || '#'}`}>
                       <p className="text-xs font-semibold text-gray-900 hover:underline">
                         {comment.profiles?.display_name}
                       </p>
@@ -689,11 +748,11 @@ export default function FeedCard({
                   <div className="flex items-center gap-3 mt-1 ml-2">
                     <button
                       onClick={() => handleCommentLike(comment.id)}
-                      className="text-xs text-gray-400 hover:text-gray-600 font-medium transition active:scale-95"
+                      className="text-xs text-gray-400 hover:text-gray-600 font-medium transition"
                     >
                       {likedComments.has(comment.id) ? 'Liked' : 'Like'}
                     </button>
-                    <button className="text-xs text-gray-400 hover:text-gray-600 font-medium transition active:scale-95">
+                    <button className="text-xs text-gray-400 hover:text-gray-600 font-medium transition">
                       Reply
                     </button>
                     <span className="text-xs text-gray-400">{timeAgo(comment.created_at)}</span>
@@ -709,19 +768,6 @@ export default function FeedCard({
           </div>
         </div>
       )}
-
-      <style jsx global>{`
-        @keyframes fade-in {
-          from { opacity: 0; transform: translateY(-5px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes slide-up {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in { animation: fade-in 0.2s ease-out; }
-        .animate-slide-up { animation: slide-up 0.2s ease-out; }
-      `}</style>
     </article>
   )
 }
