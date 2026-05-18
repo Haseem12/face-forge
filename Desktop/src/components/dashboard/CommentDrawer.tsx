@@ -45,10 +45,34 @@ export default function CommentDrawer({
   const [submitting, setSubmitting] = useState(false)
   const [likedComments, setLikedComments] = useState<Set<string>>(new Set())
   const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
   
   const drawerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const commentsEndRef = useRef<HTMLDivElement>(null)
+
+  // Detect keyboard height on mobile
+  useEffect(() => {
+    const handleResize = () => {
+      // On mobile, when keyboard opens, viewport height changes
+      const viewportHeight = window.visualViewport?.height || window.innerHeight
+      const windowHeight = window.innerHeight
+      const diff = windowHeight - viewportHeight
+      if (diff > 150) {
+        setKeyboardHeight(diff)
+      } else {
+        setKeyboardHeight(0)
+      }
+    }
+
+    window.visualViewport?.addEventListener('resize', handleResize)
+    window.addEventListener('resize', handleResize)
+    
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleResize)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [])
 
   // Validate postId
   useEffect(() => {
@@ -76,7 +100,11 @@ export default function CommentDrawer({
   useEffect(() => {
     if (isOpen && postId && postId !== '') {
       loadComments()
-      setTimeout(() => inputRef.current?.focus(), 300)
+      setTimeout(() => {
+        inputRef.current?.focus()
+        // Scroll to bottom of comments
+        commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      }, 300)
     }
   }, [isOpen, postId])
 
@@ -104,7 +132,6 @@ export default function CommentDrawer({
       let data, error
       
       if (postType === 'news') {
-        // For news: article_id is text, not UUID
         const result = await supabase
           .from('news_comments')
           .select(`
@@ -116,12 +143,11 @@ export default function CommentDrawer({
               avatar_url
             )
           `)
-          .eq('article_id', postId)  // article_id is text field
+          .eq('article_id', postId)
           .order('created_at', { ascending: true })
         data = result.data
         error = result.error
       } else {
-        // For feed: post_id is UUID
         const result = await supabase
           .from('post_comments')
           .select(`
@@ -133,7 +159,7 @@ export default function CommentDrawer({
               avatar_url
             )
           `)
-          .eq('post_id', postId)  // post_id is UUID
+          .eq('post_id', postId)
           .order('created_at', { ascending: true })
         data = result.data
         error = result.error
@@ -142,7 +168,6 @@ export default function CommentDrawer({
       if (error) throw error
       setComments(data || [])
       
-      // Load liked comments
       if (currentUserId && data?.length) {
         const likeTable = postType === 'news' ? 'news_comment_likes' : 'comment_likes'
         const commentIds = data.map(c => c.id)
@@ -165,7 +190,6 @@ export default function CommentDrawer({
     
     const isLiked = likedComments.has(commentId)
     const likeTable = postType === 'news' ? 'news_comment_likes' : 'comment_likes'
-    const commentsTable = postType === 'news' ? 'news_comments' : 'post_comments'
     
     if (isLiked) {
       await supabase
@@ -203,7 +227,7 @@ export default function CommentDrawer({
         const result = await supabase
           .from('news_comments')
           .insert({
-            article_id: postId,  // article_id is text
+            article_id: postId,
             user_id: currentUserId,
             content: commentText.trim()
           })
@@ -223,7 +247,7 @@ export default function CommentDrawer({
         const result = await supabase
           .from('post_comments')
           .insert({
-            post_id: postId,  // post_id is UUID
+            post_id: postId,
             user_id: currentUserId,
             content: commentText.trim()
           })
@@ -247,6 +271,10 @@ export default function CommentDrawer({
         setComments(prev => [...prev, data])
         setCommentText('')
         onCommentAdded?.()
+        // Scroll to bottom after new comment
+        setTimeout(() => {
+          commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        }, 100)
       }
     } catch (error) {
       console.error('Error posting comment:', error)
@@ -273,18 +301,23 @@ export default function CommentDrawer({
         onClick={onClose}
       />
 
-      {/* Drawer */}
+      {/* Drawer - adjusted for keyboard */}
       <div 
         ref={drawerRef}
-        className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl z-50 animate-slide-up max-h-[85vh] flex flex-col"
+        className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl z-50 animate-slide-up flex flex-col"
+        style={{ 
+          maxHeight: keyboardHeight > 0 ? 'calc(85vh - 100px)' : '85vh',
+          height: keyboardHeight > 0 ? 'auto' : 'auto',
+          paddingBottom: keyboardHeight > 0 ? `${keyboardHeight}px` : 'env(safe-area-inset-bottom, 0px)'
+        }}
       >
         {/* Drag Handle */}
-        <div className="flex justify-center pt-3 pb-2">
+        <div className="flex justify-center pt-3 pb-2 flex-shrink-0">
           <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 flex-shrink-0">
           <h3 className="font-semibold text-gray-900">
             Comments ({comments.length})
           </h3>
@@ -296,8 +329,8 @@ export default function CommentDrawer({
           </button>
         </div>
 
-        {/* Comments List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Comments List - Scrollable area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[50vh]">
           {loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-orange-500" />
@@ -353,8 +386,8 @@ export default function CommentDrawer({
           <div ref={commentsEndRef} />
         </div>
 
-        {/* Comment Input */}
-        <div className="border-t border-gray-100 p-3 bg-gray-50/50">
+        {/* Comment Input - Fixed at bottom */}
+        <div className="border-t border-gray-100 p-3 bg-white flex-shrink-0">
           <div className="flex items-center gap-2">
             {currentUserProfile?.avatar_url ? (
               <Image 
@@ -362,15 +395,15 @@ export default function CommentDrawer({
                 alt="" 
                 width={32} 
                 height={32} 
-                className="rounded-full object-cover" 
+                className="rounded-full object-cover flex-shrink-0" 
                 unoptimized 
               />
             ) : (
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                 {currentUserProfile?.display_name?.[0]?.toUpperCase() || 'U'}
               </div>
             )}
-            <div className="flex-1 flex items-center bg-white rounded-full border border-gray-200 px-3 py-1.5 focus-within:ring-2 focus-within:ring-orange-300 transition">
+            <div className="flex-1 flex items-center bg-gray-100 rounded-full px-3 py-1.5 focus-within:ring-2 focus-within:ring-orange-300 transition">
               <input
                 ref={inputRef}
                 type="text"
@@ -380,16 +413,14 @@ export default function CommentDrawer({
                 placeholder="Write a comment..."
                 className="flex-1 bg-transparent outline-none text-sm py-1"
               />
-              <button
-                className="p-1 text-gray-400 hover:text-gray-600 transition"
-              >
+              <button className="p-1 text-gray-400 hover:text-gray-600 transition flex-shrink-0">
                 <Smile className="h-5 w-5" />
               </button>
               {commentText && (
                 <button
                   onClick={handleSubmitComment}
                   disabled={submitting}
-                  className="ml-1 p-1 text-orange-500 hover:text-orange-600 transition"
+                  className="ml-1 p-1 text-orange-500 hover:text-orange-600 transition flex-shrink-0"
                 >
                   {submitting ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
