@@ -88,15 +88,28 @@ export default function FeedCard({
     ? post?.content?.slice(0, 200) + '...' 
     : post?.content || ''
 
-  // Debug logging
+  // Sync like state with database on mount
   useEffect(() => {
-    console.log('FeedCard mounted with post:', {
-      id: post?.id,
-      userId: post?.user_id,
-      content: post?.content?.substring(0, 50),
-      likesCount: post?.likes_count
-    })
-  }, [post])
+    const syncLikeState = async () => {
+      if (!post?.id || !currentUserId) return;
+      
+      const { data, error } = await supabase
+        .from('post_likes')
+        .select('id')
+        .eq('post_id', post.id)
+        .eq('user_id', currentUserId)
+        .maybeSingle();
+      
+      if (!error) {
+        const isActuallyLiked = !!data;
+        if (isActuallyLiked !== localIsLiked) {
+          setLocalIsLiked(isActuallyLiked);
+        }
+      }
+    };
+    
+    syncLikeState();
+  }, [post?.id, currentUserId]);
 
   // Fetch current user's info
   useEffect(() => {
@@ -205,17 +218,7 @@ export default function FeedCard({
 
   // Handle submit comment
   const handleSubmitComment = async () => {
-    if (!commentText.trim() || !post?.id) {
-      console.error('Missing comment text or post ID')
-      return
-    }
-    
-    if (!currentUserId) {
-      console.error('No user logged in')
-      return
-    }
-    
-    console.log('Submitting comment for post:', post.id)
+    if (!commentText.trim() || !post?.id) return
     
     setSubmittingComment(true)
     try {
@@ -237,13 +240,7 @@ export default function FeedCard({
         `)
         .single()
       
-      if (error) {
-        console.error('Error posting comment:', error)
-        alert(`Failed to post comment: ${error.message}`)
-        return
-      }
-      
-      console.log('Comment posted successfully:', data)
+      if (error) throw error
       
       if (data) {
         setComments(prev => [...prev, data])
@@ -256,9 +253,8 @@ export default function FeedCard({
           .update({ comments_count: localCommentCount + 1 })
           .eq('id', post.id)
       }
-    } catch (err) {
-      console.error('Unexpected error:', err)
-      alert('Failed to post comment. Please try again.')
+    } catch (error) {
+      console.error('Error posting comment:', error)
     } finally {
       setSubmittingComment(false)
     }
@@ -282,78 +278,61 @@ export default function FeedCard({
     onShare()
   }
 
-  // Handle like
+  // Handle like with duplicate protection
   const handleLikeClick = async () => {
-    if (!post?.id) {
-      console.error('No post ID found')
-      return
-    }
+    if (!post?.id || !currentUserId) return;
     
-    if (!currentUserId) {
-      console.error('No user logged in')
-      return
-    }
-    
-    console.log('Attempting to like post:', post.id)
-    
-    const newLikedState = !localIsLiked
+    const newLikedState = !localIsLiked;
     
     try {
       if (newLikedState) {
-        // Add like
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from('post_likes')
           .insert({ 
             post_id: post.id, 
             user_id: currentUserId 
-          })
-          .select()
+          });
         
-        if (error) {
-          console.error('Error adding like:', error)
-          alert(`Failed to like: ${error.message}`)
-          return
+        if (error && error.code === '23505') {
+          // Already liked, just sync UI
+          setLocalIsLiked(true);
+          return;
         }
         
-        console.log('Like added successfully:', data)
+        if (error) throw error;
         
-        // Update like count in user_feeds
         await supabase
           .from('user_feeds')
           .update({ likes_count: localLikesCount + 1 })
-          .eq('id', post.id)
+          .eq('id', post.id);
           
+        setLocalIsLiked(true);
+        setLocalLikesCount(prev => prev + 1);
+        
       } else {
-        // Remove like
         const { error } = await supabase
           .from('post_likes')
           .delete()
           .eq('post_id', post.id)
-          .eq('user_id', currentUserId)
+          .eq('user_id', currentUserId);
         
-        if (error) {
-          console.error('Error removing like:', error)
-          return
-        }
+        if (error) throw error;
         
-        console.log('Like removed successfully')
-        
-        // Update like count in user_feeds
         await supabase
           .from('user_feeds')
           .update({ likes_count: localLikesCount - 1 })
-          .eq('id', post.id)
+          .eq('id', post.id);
+          
+        setLocalIsLiked(false);
+        setLocalLikesCount(prev => prev - 1);
       }
       
-      // Update UI
-      setLocalIsLiked(newLikedState)
-      setLocalLikesCount(prev => newLikedState ? prev + 1 : prev - 1)
-      onLike()
+      onLike();
       
     } catch (err) {
-      console.error('Unexpected error:', err)
+      console.error('Error toggling like:', err);
     }
-  }
+  };
 
   // Handle delete post
   const handleDeletePost = async () => {
