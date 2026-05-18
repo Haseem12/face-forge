@@ -19,8 +19,6 @@ interface Profile {
   username: string
   avatar_url: string | null
   bio?: string
-  last_seen?: string
-  online?: boolean
 }
 
 interface Conversation {
@@ -69,14 +67,11 @@ export default function MessagesPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  const [typing, setTyping] = useState(false)
-  const [onlineStatus, setOnlineStatus] = useState<Map<string, boolean>>(new Map())
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const chatContainerRef = useRef<HTMLDivElement>(null)
-  
+
   // Get current user
   useEffect(() => {
     const getUser = async () => {
@@ -97,35 +92,22 @@ export default function MessagesPage() {
     getUser()
   }, [supabase, router])
 
-  // Fetch data
+  // Fetch data when user is loaded
   useEffect(() => {
     if (currentUserId) {
       fetchConversations()
       fetchAllies()
-      subscribeToMessages()
     }
   }, [currentUserId])
 
-  // Auto-scroll to bottom when messages change
+  // Set up real-time subscription for new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    if (!currentUserId) return
 
-  // Fetch messages when conversation changes
-  useEffect(() => {
-    if (selectedConversation) {
-      fetchMessages(selectedConversation.id)
-      markConversationAsRead(selectedConversation.id)
-      // Close mobile menu when conversation selected
-      setIsMobileMenuOpen(false)
-    }
-  }, [selectedConversation])
-
-  // Subscribe to real-time messages
-  const subscribeToMessages = () => {
     const subscription = supabase
-      .channel('messages_channel')
-      .on('postgres_changes', 
+      .channel('messages_realtime')
+      .on(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         async (payload) => {
           // Fetch full message with profile
@@ -146,43 +128,47 @@ export default function MessagesPage() {
             // Update messages if in current conversation
             if (selectedConversation?.id === newMessage.conversation_id) {
               setMessages(prev => [...prev, newMessage])
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
             }
             
-            // Update conversation list
-            setConversations(prev => prev.map(conv => 
-              conv.id === newMessage.conversation_id
-                ? {
-                    ...conv,
-                    last_message: {
-                      id: newMessage.id,
-                      content: newMessage.content,
-                      created_at: newMessage.created_at,
-                      user_id: newMessage.user_id,
-                      is_read: false
-                    },
-                    updated_at: newMessage.created_at,
-                    unread_count: conv.unread_count + (newMessage.user_id !== currentUserId ? 1 : 0)
-                  }
-                : conv
-            ))
+            // Refresh conversations list
+            fetchConversations()
           }
         }
       )
       .subscribe()
 
-    return () => subscription.unsubscribe()
-  }
+    return () => {
+      supabase.removeChannel(subscription)
+    }
+  }, [currentUserId, selectedConversation?.id])
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // Fetch messages when conversation changes
+  useEffect(() => {
+    if (selectedConversation) {
+      fetchMessages(selectedConversation.id)
+      markConversationAsRead(selectedConversation.id)
+      setIsMobileMenuOpen(false)
+    }
+  }, [selectedConversation])
 
   const fetchAllies = async () => {
     if (!currentUserId) return
     
     setLoadingAllies(true)
     try {
+      // Get users that the current user follows
       const { data: followingData } = await supabase
         .from('allies')
         .select('following_id')
         .eq('follower_id', currentUserId)
 
+      // Get users that follow the current user
       const { data: followersData } = await supabase
         .from('allies')
         .select('follower_id')
@@ -204,6 +190,7 @@ export default function MessagesPage() {
 
       if (userIds.size === 0) {
         setAllies([])
+        setLoadingAllies(false)
         return
       }
 
@@ -225,20 +212,31 @@ export default function MessagesPage() {
     
     setLoading(true)
     try {
-      const { data: participants } = await supabase
+      // Get all conversation participants for current user
+      const { data: participants, error: participantsError } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
         .eq('user_id', currentUserId)
 
+      if (participantsError) {
+        console.error('Participants error:', participantsError)
+        setConversations([])
+        setLoading(false)
+        return
+      }
+
       if (!participants || participants.length === 0) {
+        console.log('No participants found')
         setConversations([])
         setLoading(false)
         return
       }
 
       const conversationIds = participants.map(p => p.conversation_id)
+      console.log('Conversation IDs:', conversationIds)
       
-      const { data: conversationsData } = await supabase
+      // Get conversations with their latest messages
+      const { data: conversationsData, error: convError } = await supabase
         .from('conversations')
         .select(`
           id,
@@ -254,46 +252,82 @@ export default function MessagesPage() {
         .in('id', conversationIds)
         .order('updated_at', { ascending: false })
 
+      if (convError) {
+        console.error('Conversations error:', convError)
+        setConversations([])
+        setLoading(false)
+        return
+      }
+
+      console.log('Conversations data:', conversationsData)
+
       const formatted: Conversation[] = []
       
       for (const conv of conversationsData || []) {
-        const { data: otherParticipants } = await supabase
+        // Get other participant in this conversation
+        const { data: otherParticipants, error: otherError } = await supabase
           .from('conversation_participants')
           .select('user_id')
           .eq('conversation_id', conv.id)
           .neq('user_id', currentUserId)
 
-        if (!otherParticipants || otherParticipants.length === 0) continue
+        if (otherError) {
+          console.error('Other participants error:', otherError)
+          continue
+        }
+
+        if (!otherParticipants || otherParticipants.length === 0) {
+          console.log('No other participant found for conversation:', conv.id)
+          continue
+        }
 
         const otherUserId = otherParticipants[0].user_id
         
-        const { data: otherProfile } = await supabase
+        // Get other user's profile
+        const { data: otherProfile, error: profileError } = await supabase
           .from('profiles')
           .select('id, display_name, username, avatar_url, bio')
           .eq('id', otherUserId)
           .single()
 
+        if (profileError) {
+          console.error('Profile error for user:', otherUserId, profileError)
+          continue
+        }
+
         if (!otherProfile) continue
 
         const messages = conv.messages || []
-        const lastMessage = messages[0] || null
-        const unreadCount = messages.filter((m: any) => m.user_id !== currentUserId && !m.is_read).length
+        const lastMessage = messages.sort((a: any, b: any) => 
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )[0] || null
+        
+        const unreadCount = messages.filter((m: any) => 
+          m.user_id !== currentUserId && !m.is_read
+        ).length
 
         formatted.push({
           id: conv.id,
-          other_user: otherProfile,
+          other_user: {
+            id: otherProfile.id,
+            display_name: otherProfile.display_name,
+            username: otherProfile.username,
+            avatar_url: otherProfile.avatar_url,
+            bio: otherProfile.bio,
+          },
           last_message: lastMessage ? {
             id: lastMessage.id,
             content: lastMessage.content,
             created_at: lastMessage.created_at,
             user_id: lastMessage.user_id,
-            is_read: lastMessage.is_read,
+            is_read: lastMessage.is_read || false,
           } : null,
           unread_count: unreadCount,
           updated_at: conv.updated_at,
         })
       }
 
+      console.log('Formatted conversations:', formatted)
       setConversations(formatted)
     } catch (error) {
       console.error('Failed to fetch conversations:', error)
@@ -306,6 +340,7 @@ export default function MessagesPage() {
     if (!currentUserId) return null
 
     try {
+      // Check if conversation already exists
       const { data: existingParticipant } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
@@ -326,14 +361,19 @@ export default function MessagesPage() {
         }
       }
 
+      // Create new conversation
       const { data: conversation, error: convError } = await supabase
         .from('conversations')
-        .insert({ type: 'direct', updated_at: new Date().toISOString() })
+        .insert({ 
+          type: 'direct',
+          updated_at: new Date().toISOString()
+        })
         .select()
         .single()
 
       if (convError) throw convError
 
+      // Add participants
       await supabase.from('conversation_participants').insert([
         { conversation_id: conversation.id, user_id: currentUserId },
         { conversation_id: conversation.id, user_id: otherUserId },
@@ -349,10 +389,15 @@ export default function MessagesPage() {
   const startConversation = async (ally: Profile) => {
     const conversationId = await getOrCreateConversation(ally.id)
     if (conversationId) {
+      // Refresh conversations list
+      await fetchConversations()
+      
+      // Find the conversation and select it
       const existingConv = conversations.find(c => c.id === conversationId)
       if (existingConv) {
         setSelectedConversation(existingConv)
       } else {
+        // Create a temporary conversation object
         const newConv: Conversation = {
           id: conversationId,
           other_user: ally,
@@ -370,7 +415,7 @@ export default function MessagesPage() {
 
   const fetchMessages = async (conversationId: string) => {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('messages')
         .select(`
           *,
@@ -384,15 +429,18 @@ export default function MessagesPage() {
         .order('created_at', { ascending: true })
         .limit(100)
 
+      if (error) throw error
       setMessages(data || [])
       
       // Mark messages as read
-      await supabase
-        .from('messages')
-        .update({ is_read: true })
-        .eq('conversation_id', conversationId)
-        .neq('user_id', currentUserId)
-        .is('is_read', false)
+      if (data && data.length > 0) {
+        await supabase
+          .from('messages')
+          .update({ is_read: true })
+          .eq('conversation_id', conversationId)
+          .neq('user_id', currentUserId)
+          .is('is_read', false)
+      }
     } catch (error) {
       console.error('Failed to fetch messages:', error)
     }
@@ -449,7 +497,7 @@ export default function MessagesPage() {
       
       setMessages(prev => prev.map(m => m.id === tempId ? data : m))
       
-      // Update conversation list
+      // Update conversation list with last message
       setConversations(prev => prev.map(c => 
         c.id === selectedConversation.id 
           ? { 
@@ -687,11 +735,7 @@ export default function MessagesPage() {
                       </h3>
                     </Link>
                     <p className="text-xs text-gray-400">
-                      {onlineStatus.get(selectedConversation.other_user.id) ? (
-                        <span className="text-green-500">Online</span>
-                      ) : (
-                        `@${selectedConversation.other_user.username}`
-                      )}
+                      @{selectedConversation.other_user.username}
                     </p>
                   </div>
                 </div>
@@ -709,10 +753,7 @@ export default function MessagesPage() {
               </div>
 
               {/* Messages Area */}
-              <div 
-                ref={chatContainerRef}
-                className="flex-1 overflow-y-auto p-4 space-y-2"
-              >
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
                 {messages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-gray-400">
                     <MessageCircle className="h-16 w-16 mb-4 opacity-30" />
