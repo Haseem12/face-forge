@@ -171,7 +171,7 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
         finalContent = `Feeling ${selectedFeeling.label} ${selectedFeeling.emoji}\n\n${content}`
       }
       
-      const { error: insertError } = await supabase
+      const { data, error: insertError } = await supabase
         .from('user_feeds')
         .insert({
           user_id: userId,
@@ -182,6 +182,7 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
           feeling_emoji: selectedFeeling?.emoji,
           created_at: new Date().toISOString(),
         })
+        .select()
       
       if (insertError) throw new Error(insertError.message)
       
@@ -191,11 +192,21 @@ export default function CreatePostModal({ isOpen, onClose, onPostCreated, userId
       
       // Show success toast
       setShowSuccessToast(true)
-      setTimeout(() => setShowSuccessToast(false), 3000)
+      
+      // ✅ DISPATCH REAL-TIME EVENT - This makes the post appear immediately
+      window.dispatchEvent(new CustomEvent('postCreated', { 
+        detail: { 
+          success: true, 
+          post: data?.[0] || null 
+        } 
+      }))
+      
+      // Call the callback
+      onPostCreated()
       
       // Close modal after success
       setTimeout(() => {
-        onPostCreated()
+        setShowSuccessToast(false)
         onClose()
       }, 1500)
       
