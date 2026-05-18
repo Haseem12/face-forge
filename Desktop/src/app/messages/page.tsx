@@ -71,6 +71,8 @@ export default function MessagesPage() {
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const sentMessageIds = useRef<Set<string>>(new Set())
 
   // Get current user
   useEffect(() => {
@@ -110,6 +112,11 @@ export default function MessagesPage() {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         async (payload) => {
+          // Check if we already have this message (prevent duplicates)
+          if (sentMessageIds.current.has(payload.new.id)) {
+            return
+          }
+          
           // Fetch full message with profile
           const { data: newMessage } = await supabase
             .from('messages')
@@ -125,14 +132,24 @@ export default function MessagesPage() {
             .single()
           
           if (newMessage) {
-            // Update messages if in current conversation
-            if (selectedConversation?.id === newMessage.conversation_id) {
-              setMessages(prev => [...prev, newMessage])
-              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-            }
+            // Check if message already exists in state
+            setMessages(prev => {
+              const exists = prev.some(m => m.id === newMessage.id)
+              if (exists) return prev
+              // Update messages if in current conversation
+              if (selectedConversation?.id === newMessage.conversation_id) {
+                return [...prev, newMessage]
+              }
+              return prev
+            })
             
             // Refresh conversations list
             fetchConversations()
+            
+            // Scroll to bottom
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+            }, 100)
           }
         }
       )
@@ -162,13 +179,11 @@ export default function MessagesPage() {
     
     setLoadingAllies(true)
     try {
-      // Get users that the current user follows
       const { data: followingData } = await supabase
         .from('allies')
         .select('following_id')
         .eq('follower_id', currentUserId)
 
-      // Get users that follow the current user
       const { data: followersData } = await supabase
         .from('allies')
         .select('follower_id')
@@ -212,7 +227,6 @@ export default function MessagesPage() {
     
     setLoading(true)
     try {
-      // Get all conversation participants for current user
       const { data: participants, error: participantsError } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
@@ -226,16 +240,13 @@ export default function MessagesPage() {
       }
 
       if (!participants || participants.length === 0) {
-        console.log('No participants found')
         setConversations([])
         setLoading(false)
         return
       }
 
       const conversationIds = participants.map(p => p.conversation_id)
-      console.log('Conversation IDs:', conversationIds)
       
-      // Get conversations with their latest messages
       const { data: conversationsData, error: convError } = await supabase
         .from('conversations')
         .select(`
@@ -259,41 +270,24 @@ export default function MessagesPage() {
         return
       }
 
-      console.log('Conversations data:', conversationsData)
-
       const formatted: Conversation[] = []
       
       for (const conv of conversationsData || []) {
-        // Get other participant in this conversation
-        const { data: otherParticipants, error: otherError } = await supabase
+        const { data: otherParticipants } = await supabase
           .from('conversation_participants')
           .select('user_id')
           .eq('conversation_id', conv.id)
           .neq('user_id', currentUserId)
 
-        if (otherError) {
-          console.error('Other participants error:', otherError)
-          continue
-        }
-
-        if (!otherParticipants || otherParticipants.length === 0) {
-          console.log('No other participant found for conversation:', conv.id)
-          continue
-        }
+        if (!otherParticipants || otherParticipants.length === 0) continue
 
         const otherUserId = otherParticipants[0].user_id
         
-        // Get other user's profile
-        const { data: otherProfile, error: profileError } = await supabase
+        const { data: otherProfile } = await supabase
           .from('profiles')
           .select('id, display_name, username, avatar_url, bio')
           .eq('id', otherUserId)
           .single()
-
-        if (profileError) {
-          console.error('Profile error for user:', otherUserId, profileError)
-          continue
-        }
 
         if (!otherProfile) continue
 
@@ -327,7 +321,6 @@ export default function MessagesPage() {
         })
       }
 
-      console.log('Formatted conversations:', formatted)
       setConversations(formatted)
     } catch (error) {
       console.error('Failed to fetch conversations:', error)
@@ -340,7 +333,6 @@ export default function MessagesPage() {
     if (!currentUserId) return null
 
     try {
-      // Check if conversation already exists
       const { data: existingParticipant } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
@@ -361,7 +353,6 @@ export default function MessagesPage() {
         }
       }
 
-      // Create new conversation
       const { data: conversation, error: convError } = await supabase
         .from('conversations')
         .insert({ 
@@ -373,7 +364,6 @@ export default function MessagesPage() {
 
       if (convError) throw convError
 
-      // Add participants
       await supabase.from('conversation_participants').insert([
         { conversation_id: conversation.id, user_id: currentUserId },
         { conversation_id: conversation.id, user_id: otherUserId },
@@ -389,15 +379,12 @@ export default function MessagesPage() {
   const startConversation = async (ally: Profile) => {
     const conversationId = await getOrCreateConversation(ally.id)
     if (conversationId) {
-      // Refresh conversations list
       await fetchConversations()
       
-      // Find the conversation and select it
       const existingConv = conversations.find(c => c.id === conversationId)
       if (existingConv) {
         setSelectedConversation(existingConv)
       } else {
-        // Create a temporary conversation object
         const newConv: Conversation = {
           id: conversationId,
           other_user: ally,
@@ -432,7 +419,6 @@ export default function MessagesPage() {
       if (error) throw error
       setMessages(data || [])
       
-      // Mark messages as read
       if (data && data.length > 0) {
         await supabase
           .from('messages')
@@ -457,11 +443,16 @@ export default function MessagesPage() {
     
     setSending(true)
     const tempId = `temp-${Date.now()}`
+    const messageContent = messageInput.trim()
+    
+    // Clear input immediately for better UX
+    setMessageInput('')
+    
     const optimisticMessage: Message = {
       id: tempId,
       conversation_id: selectedConversation.id,
       user_id: currentUserId,
-      content: messageInput.trim(),
+      content: messageContent,
       created_at: new Date().toISOString(),
       is_read: false,
       profiles: {
@@ -471,8 +462,8 @@ export default function MessagesPage() {
       }
     }
     
+    // Add optimistic message
     setMessages(prev => [...prev, optimisticMessage])
-    setMessageInput('')
     
     try {
       const { data, error } = await supabase
@@ -480,7 +471,7 @@ export default function MessagesPage() {
         .insert({
           conversation_id: selectedConversation.id,
           user_id: currentUserId,
-          content: messageInput.trim(),
+          content: messageContent,
           is_read: false
         })
         .select(`
@@ -495,6 +486,10 @@ export default function MessagesPage() {
 
       if (error) throw error
       
+      // Track this message ID to prevent duplicates
+      sentMessageIds.current.add(data.id)
+      
+      // Replace optimistic message with real one
       setMessages(prev => prev.map(m => m.id === tempId ? data : m))
       
       // Update conversation list with last message
@@ -513,9 +508,18 @@ export default function MessagesPage() {
             }
           : c
       ))
+      
+      // Scroll to bottom
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      }, 100)
+      
     } catch (error) {
       console.error('Failed to send message:', error)
+      // Remove optimistic message on error
       setMessages(prev => prev.filter(m => m.id !== tempId))
+      // Restore input
+      setMessageInput(messageContent)
     } finally {
       setSending(false)
     }
@@ -543,7 +547,7 @@ export default function MessagesPage() {
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-20">
+      <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-20 flex-shrink-0">
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -573,7 +577,7 @@ export default function MessagesPage() {
           w-full absolute md:relative inset-0 z-10 md:z-auto
         `}>
           {/* Search Bar */}
-          <div className="p-3 border-b border-gray-100">
+          <div className="p-3 border-b border-gray-100 flex-shrink-0">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
@@ -588,7 +592,7 @@ export default function MessagesPage() {
 
           {/* New Chat Panel */}
           {showNewChat && (
-            <div className="border-b border-gray-100 max-h-80 overflow-y-auto bg-orange-50/20">
+            <div className="border-b border-gray-100 max-h-80 overflow-y-auto bg-orange-50/20 flex-shrink-0">
               <div className="p-3">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-gray-700">Contacts</h3>
@@ -708,8 +712,8 @@ export default function MessagesPage() {
         `}>
           {selectedConversation ? (
             <>
-              {/* Chat Header */}
-              <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
+              {/* Chat Header - Sticky */}
+              <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm flex-shrink-0">
                 <div className="flex items-center gap-3">
                   <button 
                     onClick={() => {
@@ -752,8 +756,11 @@ export default function MessagesPage() {
                 </div>
               </div>
 
-              {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {/* Messages Area - Scrollable */}
+              <div 
+                ref={messagesContainerRef}
+                className="flex-1 overflow-y-auto p-4 space-y-2"
+              >
                 {messages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-gray-400">
                     <MessageCircle className="h-16 w-16 mb-4 opacity-30" />
@@ -771,14 +778,14 @@ export default function MessagesPage() {
                         className={`flex ${isOwn ? 'justify-end' : 'justify-start'} items-end gap-2`}
                       >
                         {!isOwn && showAvatar && (
-                          <Avatar className="h-8 w-8 mb-1">
+                          <Avatar className="h-8 w-8 mb-1 flex-shrink-0">
                             {message.profiles?.avatar_url && <AvatarImage src={message.profiles.avatar_url} />}
                             <AvatarFallback className="bg-gradient-to-br from-orange-400 to-purple-600 text-white text-xs">
                               {message.profiles?.display_name?.[0]?.toUpperCase() || '?'}
                             </AvatarFallback>
                           </Avatar>
                         )}
-                        {!isOwn && !showAvatar && <div className="w-8" />}
+                        {!isOwn && !showAvatar && <div className="w-8 flex-shrink-0" />}
                         <div
                           className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
                             isOwn
@@ -805,13 +812,13 @@ export default function MessagesPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Input Area */}
-              <div className="bg-white border-t border-gray-200 p-3">
+              {/* Input Area - Sticky at bottom */}
+              <div className="bg-white border-t border-gray-200 p-3 flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  <button className="p-2 hover:bg-gray-100 rounded-full transition">
+                  <button className="p-2 hover:bg-gray-100 rounded-full transition flex-shrink-0">
                     <Smile className="h-5 w-5 text-gray-500" />
                   </button>
-                  <button className="p-2 hover:bg-gray-100 rounded-full transition">
+                  <button className="p-2 hover:bg-gray-100 rounded-full transition flex-shrink-0">
                     <Paperclip className="h-5 w-5 text-gray-500" />
                   </button>
                   <textarea
@@ -820,13 +827,14 @@ export default function MessagesPage() {
                     onChange={(e) => setMessageInput(e.target.value)}
                     onKeyDown={handleKeyPress}
                     placeholder="Type a message..."
-                    className="flex-1 resize-none rounded-2xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 transition"
+                    className="flex-1 resize-none rounded-2xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 transition min-h-[44px] max-h-[120px]"
                     rows={1}
+                    style={{ height: 'auto' }}
                   />
                   <button
                     onClick={sendMessage}
                     disabled={!messageInput.trim() || sending}
-                    className="p-2 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg transition"
+                    className="p-2 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg transition flex-shrink-0"
                   >
                     {sending ? (
                       <Loader2 className="h-5 w-5 animate-spin" />
@@ -834,7 +842,7 @@ export default function MessagesPage() {
                       <Send className="h-5 w-5" />
                     )}
                   </button>
-                  <button className="p-2 hover:bg-gray-100 rounded-full transition md:hidden">
+                  <button className="p-2 hover:bg-gray-100 rounded-full transition md:hidden flex-shrink-0">
                     <Mic className="h-5 w-5 text-gray-500" />
                   </button>
                 </div>
