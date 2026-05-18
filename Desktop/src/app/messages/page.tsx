@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { timeAgo } from '@/lib/dashboard/helpers'
 import { 
   Loader2, MessageCircle, Search, ArrowLeft, 
-  Users, UserPlus, Send, Check
+  Users, UserPlus, Send, Check, X
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -58,6 +58,7 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -74,6 +75,14 @@ export default function MessagesPage() {
         return
       }
       setCurrentUserId(user.id)
+      
+      // Get current user profile
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+      setCurrentUserProfile(profile)
     }
     getUser()
   }, [supabase, router])
@@ -86,58 +95,64 @@ export default function MessagesPage() {
     }
   }, [currentUserId])
 
-  // Fetch all allies (followers and following)
+  // ✅ FIXED: Fetch all allies using direct query without relationship
   const fetchAllies = async () => {
     if (!currentUserId) return
     
     setLoadingAllies(true)
     try {
-      // Get users that the current user follows
-      const { data: following } = await supabase
+      // Get users that the current user follows (following_id)
+      const { data: followingData, error: followingError } = await supabase
         .from('allies')
-        .select(`
-          following_id,
-          profiles:following_id (
-            id,
-            display_name,
-            username,
-            avatar_url,
-            bio
-          )
-        `)
+        .select('following_id')
         .eq('follower_id', currentUserId)
 
-      // Get users that follow the current user
-      const { data: followers } = await supabase
+      if (followingError) {
+        console.error('Error fetching following:', followingError)
+      }
+
+      // Get users that follow the current user (follower_id)
+      const { data: followersData, error: followersError } = await supabase
         .from('allies')
-        .select(`
-          follower_id,
-          profiles:follower_id (
-            id,
-            display_name,
-            username,
-            avatar_url,
-            bio
-          )
-        `)
+        .select('follower_id')
         .eq('following_id', currentUserId)
 
-      // Combine and deduplicate
-      const alliesMap = new Map<string, Profile>()
+      if (followersError) {
+        console.error('Error fetching followers:', followersError)
+      }
+
+      // Collect all unique user IDs
+      const userIds = new Set<string>()
       
-      following?.forEach((f: any) => {
-        if (f.profiles && f.profiles.id !== currentUserId) {
-          alliesMap.set(f.profiles.id, f.profiles)
+      followingData?.forEach((f: any) => {
+        if (f.following_id && f.following_id !== currentUserId) {
+          userIds.add(f.following_id)
         }
       })
       
-      followers?.forEach((f: any) => {
-        if (f.profiles && f.profiles.id !== currentUserId) {
-          alliesMap.set(f.profiles.id, f.profiles)
+      followersData?.forEach((f: any) => {
+        if (f.follower_id && f.follower_id !== currentUserId) {
+          userIds.add(f.follower_id)
         }
       })
 
-      setAllies(Array.from(alliesMap.values()))
+      if (userIds.size === 0) {
+        setAllies([])
+        setLoadingAllies(false)
+        return
+      }
+
+      // Fetch profiles for these users
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, avatar_url, bio')
+        .in('id', Array.from(userIds))
+
+      if (profilesError) {
+        console.error('Error fetching profiles:', profilesError)
+      }
+
+      setAllies(profilesData || [])
     } catch (error) {
       console.error('Failed to fetch allies:', error)
     } finally {
@@ -151,59 +166,75 @@ export default function MessagesPage() {
     
     setLoading(true)
     try {
-      const { data: participants, error } = await supabase
+      // Get all conversation participants for current user
+      const { data: participants, error: participantsError } = await supabase
         .from('conversation_participants')
+        .select('conversation_id')
+        .eq('user_id', currentUserId)
+
+      if (participantsError) throw participantsError
+
+      if (!participants || participants.length === 0) {
+        setConversations([])
+        setLoading(false)
+        return
+      }
+
+      const conversationIds = participants.map(p => p.conversation_id)
+      
+      // Get conversations with their messages
+      const { data: conversationsData, error: convError } = await supabase
+        .from('conversations')
         .select(`
-          conversation_id,
-          conversations!inner (
+          id,
+          updated_at,
+          messages (
             id,
-            updated_at,
-            messages (
-              id,
-              content,
-              created_at,
-              user_id
-            )
+            content,
+            created_at,
+            user_id
           )
         `)
-        .eq('user_id', currentUserId)
-        .order('updated_at', { ascending: false, foreignTable: 'conversations' })
+        .in('id', conversationIds)
+        .order('updated_at', { ascending: false })
 
-      if (error) throw error
+      if (convError) throw convError
 
       const formatted: Conversation[] = []
       
-      for (const p of participants || []) {
-        const { data: otherParticipant } = await supabase
+      for (const conv of conversationsData || []) {
+        // Get other participant in this conversation
+        const { data: otherParticipants } = await supabase
           .from('conversation_participants')
-          .select(`
-            user_id,
-            profiles!user_id (
-              id,
-              display_name,
-              username,
-              avatar_url,
-              bio
-            )
-          `)
-          .eq('conversation_id', p.conversation_id)
+          .select('user_id')
+          .eq('conversation_id', conv.id)
           .neq('user_id', currentUserId)
+
+        if (!otherParticipants || otherParticipants.length === 0) continue
+
+        const otherUserId = otherParticipants[0].user_id
+        
+        // Get other user's profile
+        const { data: otherProfile } = await supabase
+          .from('profiles')
+          .select('id, display_name, username, avatar_url, bio')
+          .eq('id', otherUserId)
           .single()
 
-        if (!otherParticipant?.profiles) continue
+        if (!otherProfile) continue
 
-        const messages = p.conversations?.messages || []
+        const messages = conv.messages || []
         const lastMessage = messages[0] || null
         const unreadCount = messages.filter((m: any) => m.user_id !== currentUserId).length
 
         formatted.push({
-          id: p.conversation_id,
+          id: conv.id,
           other_user: {
-            id: otherParticipant.user_id,
-            display_name: otherParticipant.profiles.display_name,
-            username: otherParticipant.profiles.username,
-            avatar_url: otherParticipant.profiles.avatar_url,
-            bio: otherParticipant.profiles.bio,
+            id: otherProfile.id,
+            display_name: otherProfile.display_name,
+            username: otherProfile.username,
+            avatar_url: otherProfile.avatar_url,
+            bio: otherProfile.bio,
           },
           last_message: lastMessage ? {
             id: lastMessage.id,
@@ -212,7 +243,7 @@ export default function MessagesPage() {
             user_id: lastMessage.user_id,
           } : null,
           unread_count: unreadCount,
-          updated_at: p.conversations?.updated_at || new Date().toISOString(),
+          updated_at: conv.updated_at,
         })
       }
 
@@ -230,14 +261,15 @@ export default function MessagesPage() {
 
     try {
       // Check if conversation already exists
-      const { data: existing } = await supabase
+      const { data: existingParticipant } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
         .eq('user_id', currentUserId)
 
-      const conversationIds = existing?.map(c => c.conversation_id) || []
+      const conversationIds = existingParticipant?.map(p => p.conversation_id) || []
 
       if (conversationIds.length > 0) {
+        // Check if the other user is in any of these conversations
         const { data: match } = await supabase
           .from('conversation_participants')
           .select('conversation_id')
@@ -251,13 +283,16 @@ export default function MessagesPage() {
       }
 
       // Create new conversation
-      const { data: conversation, error } = await supabase
+      const { data: conversation, error: convError } = await supabase
         .from('conversations')
-        .insert({ type: 'direct' })
+        .insert({ 
+          type: 'direct',
+          updated_at: new Date().toISOString()
+        })
         .select()
         .single()
 
-      if (error) throw error
+      if (convError) throw convError
 
       // Add participants
       await supabase.from('conversation_participants').insert([
@@ -294,6 +329,7 @@ export default function MessagesPage() {
       }
       setSelectedAlly(null)
       setShowNewChat(false)
+      setSearchQuery('')
     }
   }
 
@@ -304,7 +340,7 @@ export default function MessagesPage() {
         .from('messages')
         .select(`
           *,
-          profiles!user_id (
+          profiles:user_id (
             display_name,
             username,
             avatar_url
@@ -316,6 +352,13 @@ export default function MessagesPage() {
 
       if (error) throw error
       setMessages(data || [])
+      
+      // Mark as read
+      await supabase
+        .from('conversation_participants')
+        .update({ last_read_at: new Date().toISOString() })
+        .eq('conversation_id', conversationId)
+        .eq('user_id', currentUserId)
       
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -350,9 +393,9 @@ export default function MessagesPage() {
       content: messageInput.trim(),
       created_at: new Date().toISOString(),
       profiles: {
-        display_name: 'You',
-        username: 'you',
-        avatar_url: null,
+        display_name: currentUserProfile?.display_name || 'You',
+        username: currentUserProfile?.username || 'you',
+        avatar_url: currentUserProfile?.avatar_url,
       }
     }
     
@@ -370,7 +413,7 @@ export default function MessagesPage() {
         })
         .select(`
           *,
-          profiles!user_id (
+          profiles:user_id (
             display_name,
             username,
             avatar_url
@@ -439,7 +482,10 @@ export default function MessagesPage() {
               <h1 className="text-xl font-black text-gray-900">Messages</h1>
             </div>
             <button
-              onClick={() => setShowNewChat(!showNewChat)}
+              onClick={() => {
+                setShowNewChat(!showNewChat)
+                setSearchQuery('')
+              }}
               className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-purple-600 text-white text-sm font-medium rounded-full hover:shadow-lg transition"
             >
               <UserPlus className="h-4 w-4" />
@@ -471,10 +517,15 @@ export default function MessagesPage() {
             {showNewChat && (
               <div className="border-b border-gray-100 max-h-64 overflow-y-auto">
                 <div className="p-3 bg-orange-50/30">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                    <Users className="h-4 w-4 text-orange-500" />
-                    Your Allies
-                  </h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                      <Users className="h-4 w-4 text-orange-500" />
+                      Your Allies
+                    </h3>
+                    <button onClick={() => setShowNewChat(false)} className="p-1 hover:bg-gray-200 rounded-full">
+                      <X className="h-3 w-3 text-gray-500" />
+                    </button>
+                  </div>
                   {loadingAllies ? (
                     <div className="flex justify-center py-4">
                       <Loader2 className="h-5 w-5 animate-spin text-orange-500" />
@@ -538,7 +589,6 @@ export default function MessagesPage() {
                     onClick={() => {
                       setSelectedConversation(conv)
                       setShowNewChat(false)
-                      setSearchQuery('')
                     }}
                     className={`w-full p-3 flex gap-3 hover:bg-gray-50 transition text-left ${
                       selectedConversation?.id === conv.id ? 'bg-orange-50' : ''
