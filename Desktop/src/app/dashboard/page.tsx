@@ -1,4 +1,5 @@
-"use client"
+'use client'
+
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -77,15 +78,15 @@ export default function DashboardPage() {
   const [showRefreshToast, setShowRefreshToast] = useState(false)
   const observerTarget = useRef<HTMLDivElement>(null)
 
-  // ── Load Following Feed Posts (from users you follow + your own posts) ──
+  // ✅ FIX: Use ref for subscription instead of state
+  const subscriptionRef = useRef<any>(null)
+
+  // ── Load Following Feed Posts ──────────────────────────────────────────
   const loadFollowingFeedPosts = useCallback(async () => {
     if (!user) return
     setFollowingFeedLoading(true)
     try {
-      // Get IDs of users you follow
       const followingIds = Array.from(following)
-      
-      // Include your own user ID
       const allUserIds = [...followingIds, user.id]
       
       if (allUserIds.length === 0) {
@@ -118,7 +119,6 @@ export default function DashboardPage() {
       
       setFollowingFeedPosts(postsWithProfiles)
       
-      // Load likes for current user
       if (user && postsWithProfiles.length) {
         const postIds = postsWithProfiles.map(p => p.id)
         const { data: likes } = await supabase
@@ -129,7 +129,6 @@ export default function DashboardPage() {
         
         setLikedFollowingFeed(new Set(likes?.map(l => l.post_id) || []))
         
-        // Load comment counts
         const { data: comments } = await supabase
           .from('post_comments')
           .select('post_id')
@@ -147,7 +146,7 @@ export default function DashboardPage() {
     }
   }, [supabase, user, following])
 
-  // ── Load News with Cache Busting ──────────────────────────────────────────
+  // ── Load News ──────────────────────────────────────────────────────────
   const loadNews = useCallback(async (currentUser: any, forceRefresh = false) => {
     setNewsLoading(true)
     try {
@@ -221,7 +220,7 @@ export default function DashboardPage() {
     }
   }, [refreshing, user, loadNews])
 
-  // ── Update displayed news when newsItems change ─────────────────────────────
+  // ── Update displayed news ─────────────────────────────────────────────
   useEffect(() => {
     if (newsItems.length > 0) {
       const initialCount = showAllNews ? newsItems.length : Math.min(5, newsItems.length)
@@ -262,6 +261,99 @@ export default function DashboardPage() {
       loadFollowingFeedPosts()
     }
   }, [following, user, loadFollowingFeedPosts])
+
+  // ✅ FIXED: REAL-TIME SUBSCRIPTION - Using ref instead of state
+  useEffect(() => {
+    if (!user) return
+
+    const followingIds = Array.from(following)
+    const allUserIds = [...followingIds, user.id]
+    
+    if (allUserIds.length === 0) return
+
+    // Clean up previous subscription if exists
+    if (subscriptionRef.current) {
+      supabase.removeChannel(subscriptionRef.current)
+    }
+
+    const subscription = supabase
+      .channel('user_feeds_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'user_feeds',
+          filter: `user_id=in.(${allUserIds.join(',')})`
+        },
+        async (payload) => {
+          console.log('📝 New post received in real-time:', payload.new)
+          
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('id, username, display_name, avatar_url')
+            .eq('id', payload.new.user_id)
+            .single()
+          
+          const newPost = {
+            ...payload.new,
+            profiles: profile
+          }
+          
+          setFollowingFeedPosts(prev => [newPost, ...prev])
+          setShowRefreshToast(true)
+          setTimeout(() => setShowRefreshToast(false), 2000)
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'user_feeds'
+        },
+        (payload) => {
+          console.log('🗑️ Post deleted:', payload.old)
+          setFollowingFeedPosts(prev => prev.filter(post => post.id !== payload.old.id))
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'user_feeds'
+        },
+        (payload) => {
+          console.log('✏️ Post updated:', payload.new)
+          setFollowingFeedPosts(prev => prev.map(post => 
+            post.id === payload.new.id ? { ...post, ...payload.new } : post
+          ))
+        }
+      )
+      .subscribe()
+
+    subscriptionRef.current = subscription
+
+    // ✅ FIXED: Proper cleanup without using state
+    return () => {
+      if (subscriptionRef.current) {
+        supabase.removeChannel(subscriptionRef.current)
+        subscriptionRef.current = null
+      }
+    }
+  }, [user, following, supabase])
+
+  // ── Listen for manual post created events ──
+  useEffect(() => {
+    const handlePostCreated = (event: any) => {
+      console.log('🔄 Manual post refresh triggered', event.detail)
+      loadFollowingFeedPosts()
+    }
+    
+    window.addEventListener('postCreated', handlePostCreated)
+    return () => window.removeEventListener('postCreated', handlePostCreated)
+  }, [loadFollowingFeedPosts])
 
   // ── Main useEffect for user data loading ──────────────────────────────────
   useEffect(() => {
@@ -364,10 +456,7 @@ export default function DashboardPage() {
   }
 
   const handleTagClick = (tag: string) => {
-    // Navigate to search or filter by tag
     console.log('Searching for tag:', tag)
-    // You can implement search navigation here
-    // router.push(`/search?q=${tag}`)
   }
 
   // Article reader navigation
@@ -396,7 +485,6 @@ export default function DashboardPage() {
 
   // ── Derived View Logic ─────────────────────────────────────────────────────
   const currentNewsList = showAllNews ? newsItems : displayedNews
-  const followingForges = feedItems.filter(f => following.has(f.user_id))
 
   const usersWithSelf: any[] = []
   const seen = new Set<string>()
@@ -623,7 +711,7 @@ export default function DashboardPage() {
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
           <div className="bg-gray-900 text-white px-4 py-2 rounded-full text-sm flex items-center gap-2 shadow-lg">
             <RefreshCw className="h-4 w-4" />
-            News refreshed with latest articles!
+            New content available!
           </div>
         </div>
       )}
