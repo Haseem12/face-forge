@@ -124,6 +124,21 @@
   }
 }
 
+/* In your global.css or add to a style tag */
+html, body {
+  height: 100%;
+  position: fixed;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* For better keyboard handling on mobile */
+@media (max-width: 768px) {
+  .drawer-open {
+    position: fixed;
+    overflow: hidden;
+  }
+}
 
 .animate-bounce-slow {
 animation: bounce 2s ease-in-out infinite;
