@@ -50,9 +50,18 @@ export default function CommentDrawer({
   const inputRef = useRef<HTMLInputElement>(null)
   const commentsEndRef = useRef<HTMLDivElement>(null)
 
+  // Validate postId
+  useEffect(() => {
+    if (isOpen && (!postId || postId === '')) {
+      console.error('CommentDrawer: Invalid postId:', postId)
+      onClose()
+    }
+  }, [isOpen, postId, onClose])
+
   // Get current user profile
   useEffect(() => {
     const getProfile = async () => {
+      if (!currentUserId) return
       const { data } = await supabase
         .from('profiles')
         .select('avatar_url, display_name, username')
@@ -65,7 +74,7 @@ export default function CommentDrawer({
 
   // Load comments when drawer opens
   useEffect(() => {
-    if (isOpen && postId) {
+    if (isOpen && postId && postId !== '') {
       loadComments()
       setTimeout(() => inputRef.current?.focus(), 300)
     }
@@ -88,24 +97,47 @@ export default function CommentDrawer({
   }, [isOpen, onClose])
 
   const loadComments = async () => {
+    if (!postId || postId === '') return
+    
     setLoading(true)
     try {
-      const table = postType === 'news' ? 'news_comments' : 'post_comments'
-      const idField = postType === 'news' ? 'article_id' : 'post_id'
+      let data, error
       
-      const { data, error } = await supabase
-        .from(table)
-        .select(`
-          *,
-          profiles:user_id (
-            id,
-            username,
-            display_name,
-            avatar_url
-          )
-        `)
-        .eq(idField, postId)
-        .order('created_at', { ascending: true })
+      if (postType === 'news') {
+        // For news: article_id is text, not UUID
+        const result = await supabase
+          .from('news_comments')
+          .select(`
+            *,
+            profiles:user_id (
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          `)
+          .eq('article_id', postId)  // article_id is text field
+          .order('created_at', { ascending: true })
+        data = result.data
+        error = result.error
+      } else {
+        // For feed: post_id is UUID
+        const result = await supabase
+          .from('post_comments')
+          .select(`
+            *,
+            profiles:user_id (
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          `)
+          .eq('post_id', postId)  // post_id is UUID
+          .order('created_at', { ascending: true })
+        data = result.data
+        error = result.error
+      }
       
       if (error) throw error
       setComments(data || [])
@@ -129,6 +161,8 @@ export default function CommentDrawer({
   }
 
   const handleCommentLike = async (commentId: string) => {
+    if (!currentUserId) return
+    
     const isLiked = likedComments.has(commentId)
     const likeTable = postType === 'news' ? 'news_comment_likes' : 'comment_likes'
     const commentsTable = postType === 'news' ? 'news_comments' : 'post_comments'
@@ -159,30 +193,53 @@ export default function CommentDrawer({
   }
 
   const handleSubmitComment = async () => {
-    if (!commentText.trim()) return
+    if (!commentText.trim() || !postId || postId === '') return
     
     setSubmitting(true)
     try {
-      const table = postType === 'news' ? 'news_comments' : 'post_comments'
-      const idField = postType === 'news' ? 'article_id' : 'post_id'
+      let data, error
       
-      const { data, error } = await supabase
-        .from(table)
-        .insert({
-          [idField]: postId,
-          user_id: currentUserId,
-          content: commentText.trim()
-        })
-        .select(`
-          *,
-          profiles:user_id (
-            id,
-            username,
-            display_name,
-            avatar_url
-          )
-        `)
-        .single()
+      if (postType === 'news') {
+        const result = await supabase
+          .from('news_comments')
+          .insert({
+            article_id: postId,  // article_id is text
+            user_id: currentUserId,
+            content: commentText.trim()
+          })
+          .select(`
+            *,
+            profiles:user_id (
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          `)
+          .single()
+        data = result.data
+        error = result.error
+      } else {
+        const result = await supabase
+          .from('post_comments')
+          .insert({
+            post_id: postId,  // post_id is UUID
+            user_id: currentUserId,
+            content: commentText.trim()
+          })
+          .select(`
+            *,
+            profiles:user_id (
+              id,
+              username,
+              display_name,
+              avatar_url
+            )
+          `)
+          .single()
+        data = result.data
+        error = result.error
+      }
       
       if (error) throw error
       
@@ -247,7 +304,7 @@ export default function CommentDrawer({
             </div>
           ) : comments.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
-              <MessageCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <MessageCircleIcon className="h-12 w-12 mx-auto mb-3 opacity-50" />
               <p className="text-sm font-medium">No comments yet</p>
               <p className="text-xs mt-1">Be the first to comment!</p>
             </div>
@@ -359,5 +416,14 @@ export default function CommentDrawer({
         .animate-slide-up { animation: slide-up 0.3s ease-out; }
       `}</style>
     </>
+  )
+}
+
+// Helper icon component
+function MessageCircleIcon(props: any) {
+  return (
+    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
   )
 }
