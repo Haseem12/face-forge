@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import { 
   Bookmark, Share2, ChevronLeft, ChevronRight, 
-  Heart, MessageCircle, Eye, Clock, ArrowLeft, Check,
-  X, ExternalLink, Copy, Twitter
+  Heart, MessageCircle, Clock, ArrowLeft, Check,
+  X, ExternalLink, Copy
 } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -69,7 +69,6 @@ export default function ArticleReader({
 }: ArticleReaderProps) {
   const [loading, setLoading] = useState(true)
   const [isSaved, setIsSaved] = useState(false)
-  const [showShareMenu, setShowShareMenu] = useState(false)
   const [fullContent, setFullContent] = useState<string>('')
   const [copied, setCopied] = useState(false)
   const [localLiked, setLocalLiked] = useState(isLiked)
@@ -128,18 +127,13 @@ export default function ArticleReader({
         if (article.description) {
           const cleaned = stripHtml(article.description)
           if (cleaned.length > 30) {
-            setFullContent(
-              cleaned +
-              '\n\n' +
-              `This is a preview. Read the full article on ${article.source?.name} for complete coverage.`
-            )
+            setFullContent(cleaned)
             setLoading(false)
             return
           }
         }
 
         setFullContent('')
-
       } catch (error) {
         console.error('Failed to fetch full content:', error)
         const fallback = article.description ? stripHtml(article.description) : ''
@@ -150,7 +144,7 @@ export default function ArticleReader({
     }
 
     fetchFullContent()
-  }, [article.url, article.content, article.description, article.source?.name])
+  }, [article.url, article.content, article.description])
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -165,18 +159,9 @@ export default function ArticleReader({
       await navigator.clipboard.writeText(article.url)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-      setShowShareMenu(false)
     } catch (error) {
       console.error('Failed to copy:', error)
     }
-  }
-
-  const shareOnTwitter = () => {
-    window.open(
-      `https://twitter.com/intent/tweet?text=${encodeURIComponent(article.title)}&url=${encodeURIComponent(article.url)}`,
-      '_blank'
-    )
-    setShowShareMenu(false)
   }
 
   const formatContent = (content: string) => {
@@ -199,124 +184,54 @@ export default function ArticleReader({
 
   return (
     <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
-      {/* Browser-style Header */}
-      <div className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
-        {/* Browser URL Bar */}
-        <div className="bg-gray-100 px-4 py-2 flex items-center justify-between border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <div className="flex gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-red-500" />
-              <div className="w-3 h-3 rounded-full bg-yellow-500" />
-              <div className="w-3 h-3 rounded-full bg-green-500" />
-            </div>
-            <div className="flex items-center gap-1 ml-2">
+      {/* Simple Header - Just back button and actions */}
+      <div className="sticky top-0 z-10 bg-white border-b border-gray-100">
+        <div className="max-w-3xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={onClose}
+              className="flex items-center gap-2 text-gray-500 hover:text-orange-500 transition"
+            >
+              <ArrowLeft className="h-5 w-5" />
+              <span className="text-sm font-medium hidden sm:inline">Back</span>
+            </button>
+            
+            <div className="flex items-center gap-2">
               {hasPrevious && onPrevious && (
-                <button onClick={onPrevious} className="p-1 rounded hover:bg-gray-200 transition">
-                  <ChevronLeft className="h-4 w-4 text-gray-600" />
+                <button onClick={onPrevious} className="p-2 rounded-full hover:bg-gray-100 transition">
+                  <ChevronLeft className="h-5 w-5 text-gray-600" />
                 </button>
               )}
               {hasNext && onNext && (
-                <button onClick={onNext} className="p-1 rounded hover:bg-gray-200 transition">
-                  <ChevronRight className="h-4 w-4 text-gray-600" />
+                <button onClick={onNext} className="p-2 rounded-full hover:bg-gray-100 transition">
+                  <ChevronRight className="h-5 w-5 text-gray-600" />
                 </button>
               )}
             </div>
-          </div>
-          
-          {/* URL Bar */}
-          <div className="flex-1 max-w-2xl mx-4">
-            <div className="bg-white rounded-lg px-3 py-1.5 text-sm text-gray-500 truncate border border-gray-200 shadow-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-green-500 flex-shrink-0" />
-                <span className="truncate">{article.url?.replace(/^https?:\/\//, '').split('/')[0]}</span>
-                <span className="text-xs text-gray-400 flex-shrink-0">🔒</span>
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => window.open(article.url, '_blank')}
-              className="p-2 rounded-full hover:bg-gray-200 transition text-gray-600"
-              title="Open in new tab"
-            >
-              <ExternalLink className="h-4 w-4" />
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full hover:bg-gray-200 transition text-gray-600"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-        
-        {/* Article Navigation Bar */}
-        <div className="max-w-4xl mx-auto px-4 py-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-3">
-              <Link href="/dashboard" className="text-gray-500 hover:text-orange-500 text-sm font-medium transition">
-                ← Back to Feed
-              </Link>
-              <span className="text-gray-300">|</span>
-              <span className="text-xs text-gray-400">
-                {article.source?.name}
-              </span>
-            </div>
-            
+
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setIsSaved(!isSaved)}
                 className={`p-2 rounded-full transition ${isSaved ? 'bg-orange-50 text-orange-500' : 'hover:bg-gray-100 text-gray-600'}`}
-                title={isSaved ? 'Saved' : 'Save'}
               >
-                <Bookmark className={`h-4 w-4 ${isSaved ? 'fill-orange-500' : ''}`} />
+                <Bookmark className={`h-5 w-5 ${isSaved ? 'fill-orange-500' : ''}`} />
               </button>
-              
-              <div className="relative">
-                <button
-                  onClick={() => setShowShareMenu(!showShareMenu)}
-                  className="p-2 rounded-full hover:bg-gray-100 transition text-gray-600"
-                  title="Share"
-                >
-                  {copied ? <Check className="h-4 w-4 text-green-500" /> : <Share2 className="h-4 w-4" />}
-                </button>
-                {showShareMenu && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-20 animate-fade-in">
-                    <button
-                      onClick={handleShare}
-                      className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                    >
-                      <Copy className="h-4 w-4" /> Copy link
-                    </button>
-                    <button
-                      onClick={shareOnTwitter}
-                      className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                    >
-                      <Twitter className="h-4 w-4 text-blue-500" /> Share on X
-                    </button>
-                    <button
-                      onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(article.url)}`, '_blank')}
-                      className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                    >
-                      <svg className="h-4 w-4 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M22 12c0-5.523-4.477-10-10-10S2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879v-6.99h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.99C18.343 21.128 22 16.991 22 12z" />
-                      </svg>
-                      Share on Facebook
-                    </button>
-                  </div>
-                )}
-              </div>
+              <button
+                onClick={handleShare}
+                className="p-2 rounded-full hover:bg-gray-100 transition text-gray-600"
+              >
+                {copied ? <Check className="h-5 w-5 text-green-500" /> : <Share2 className="h-5 w-5" />}
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Article Content - Clean Browser Style */}
+      {/* Article Content */}
       <div className="max-w-3xl mx-auto px-4 py-8 pb-32">
-        {/* Header Image - From News Card */}
+        {/* Header Image */}
         {article.urlToImage && !imageError && (
-          <div className="relative rounded-xl overflow-hidden mb-8 shadow-lg bg-gray-100">
+          <div className="relative rounded-xl overflow-hidden mb-8 bg-gray-100 shadow-md">
             <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
               {!imageLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -334,17 +249,16 @@ export default function ArticleReader({
                 onError={() => setImageError(true)}
               />
             </div>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent pointer-events-none" />
           </div>
         )}
 
         {/* Title */}
-        <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-gray-900 mb-4 leading-tight tracking-tight">
+        <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-gray-900 mb-4 leading-tight">
           {article.title}
         </h1>
 
         {/* Meta Info */}
-        <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-gray-500 mb-8 pb-6 border-b border-gray-100">
+        <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-gray-500 mb-6 pb-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold shadow-md">
               {article.source?.name?.[0]?.toUpperCase() || 'N'}
@@ -367,21 +281,17 @@ export default function ArticleReader({
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
               onClick={handleLike}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition ${
-                localLiked 
-                  ? 'bg-red-50 text-red-500' 
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
+              className={`flex items-center gap-1.5 transition ${localLiked ? 'text-red-500' : 'text-gray-500 hover:text-red-500'}`}
             >
               <Heart className={`h-4 w-4 ${localLiked ? 'fill-red-500' : ''}`} />
               <span className="text-xs font-medium">Like</span>
             </button>
             <button
               onClick={handleComment}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+              className="flex items-center gap-1.5 text-gray-500 hover:text-blue-500 transition"
             >
               <MessageCircle className="h-4 w-4" />
               <span className="text-xs font-medium">{localCommentCount} Comments</span>
@@ -424,8 +334,6 @@ export default function ArticleReader({
             <div className="h-4 bg-gray-200 rounded-full animate-pulse w-5/6" />
             <div className="h-4 bg-gray-200 rounded-full animate-pulse w-2/3" />
             <div className="h-32 bg-gray-100 rounded-xl animate-pulse mt-4" />
-            <div className="h-4 bg-gray-200 rounded-full animate-pulse w-4/5" />
-            <div className="h-4 bg-gray-200 rounded-full animate-pulse w-3/4" />
           </div>
         ) : (
           <div className="prose prose-lg max-w-none">
@@ -433,7 +341,6 @@ export default function ArticleReader({
               formatContent(fullContent)
             ) : (
               <div className="text-center py-12 bg-gray-50 rounded-2xl">
-                <div className="text-6xl mb-4">📄</div>
                 <p className="text-gray-500 font-medium">Content could not be extracted.</p>
                 <p className="text-sm text-gray-400 mt-2 mb-6">
                   This site may block previews or require a subscription.
@@ -452,7 +359,7 @@ export default function ArticleReader({
           </div>
         )}
 
-        {/* Original Source Link */}
+        {/* Source Link */}
         {fullContent && (
           <div className="mt-10 pt-6 border-t border-gray-100 text-center">
             <a
@@ -474,54 +381,46 @@ export default function ArticleReader({
         </div>
       </div>
 
-      {/* Bottom Action Bar - Floating */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-lg border border-gray-200 rounded-full py-2 px-4 shadow-xl z-20">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={handleLike}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition ${
-              localLiked ? 'text-red-500' : 'text-gray-600 hover:text-red-500'
-            }`}
-          >
-            <Heart className={`h-4 w-4 ${localLiked ? 'fill-red-500' : ''}`} />
-            <span className="text-xs font-medium">Like</span>
-          </button>
-          
-          <button
-            onClick={handleComment}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-gray-600 hover:text-blue-500 transition"
-          >
-            <MessageCircle className="h-4 w-4" />
-            <span className="text-xs font-medium">Comment</span>
-          </button>
+      {/* Bottom Action Bar */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 py-2 z-10 shadow-lg">
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="flex items-center justify-around">
+            <button
+              onClick={handleLike}
+              className={`flex flex-col items-center gap-0.5 transition ${localLiked ? 'text-red-500' : 'text-gray-500'}`}
+            >
+              <Heart className={`h-5 w-5 ${localLiked ? 'fill-red-500' : ''}`} />
+              <span className="text-[10px]">Like</span>
+            </button>
+            
+            <button
+              onClick={handleComment}
+              className="flex flex-col items-center gap-0.5 text-gray-500 hover:text-blue-500 transition"
+            >
+              <MessageCircle className="h-5 w-5" />
+              <span className="text-[10px]">Comment</span>
+            </button>
 
-          <button
-            onClick={() => setIsSaved(!isSaved)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition ${
-              isSaved ? 'text-orange-500' : 'text-gray-600 hover:text-orange-500'
-            }`}
-          >
-            <Bookmark className={`h-4 w-4 ${isSaved ? 'fill-orange-500' : ''}`} />
-            <span className="text-xs font-medium">{isSaved ? 'Saved' : 'Save'}</span>
-          </button>
+            <button
+              onClick={() => setIsSaved(!isSaved)}
+              className={`flex flex-col items-center gap-0.5 transition ${isSaved ? 'text-orange-500' : 'text-gray-500'}`}
+            >
+              <Bookmark className={`h-5 w-5 ${isSaved ? 'fill-orange-500' : ''}`} />
+              <span className="text-[10px]">{isSaved ? 'Saved' : 'Save'}</span>
+            </button>
 
-          <button
-            onClick={handleShare}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-gray-600 hover:text-green-500 transition"
-          >
-            <Share2 className="h-4 w-4" />
-            <span className="text-xs font-medium">Share</span>
-          </button>
+            <button
+              onClick={handleShare}
+              className="flex flex-col items-center gap-0.5 text-gray-500 hover:text-green-500 transition"
+            >
+              {copied ? <Check className="h-5 w-5 text-green-500" /> : <Share2 className="h-5 w-5" />}
+              <span className="text-[10px]">{copied ? 'Copied!' : 'Share'}</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <style jsx global>{`
-        @keyframes fade-in {
-          from { opacity: 0; transform: translateY(-8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in { animation: fade-in 0.15s ease-out; }
-        
         .prose {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
           font-size: 1.125rem;
