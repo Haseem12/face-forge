@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { 
   Heart, MessageCircle, Share2, MoreHorizontal, Send, 
   Smile, X, Loader2, Check, ThumbsUp, MapPin, Flag, Bookmark,
-  Edit2, Trash2
+  Edit2, Trash2, Volume2, VolumeX
 } from 'lucide-react'
 import { timeAgo } from '@/lib/dashboard/helpers'
 
@@ -93,10 +93,12 @@ export default function FeedCard({
   const [localIsLiked, setLocalIsLiked] = useState(isLiked)
   const [currentUserAvatar, setCurrentUserAvatar] = useState('')
   const [currentUserDisplayName, setCurrentUserDisplayName] = useState('')
+  const [videoMuted, setVideoMuted] = useState(true)
+  const [videoPlaying, setVideoPlaying] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const shareRef = useRef<HTMLDivElement>(null)
   const commentInputRef = useRef<HTMLInputElement>(null)
-  const postContentRef = useRef<HTMLDivElement>(null)
 
   const displayContent = shouldTruncate && !showFullContent 
     ? post.content?.slice(0, 200) + '...' 
@@ -119,6 +121,28 @@ export default function FeedCard({
     }
     getCurrentUserInfo()
   }, [currentUserId, supabase])
+
+  // Auto-play video when in view
+  useEffect(() => {
+    if (post.media_type === 'video' && videoRef.current) {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              videoRef.current?.play()
+              setVideoPlaying(true)
+            } else {
+              videoRef.current?.pause()
+              setVideoPlaying(false)
+            }
+          })
+        },
+        { threshold: 0.5 }
+      )
+      observer.observe(videoRef.current)
+      return () => observer.disconnect()
+    }
+  }, [post.media_type])
 
   // Load comments
   const loadComments = async () => {
@@ -233,7 +257,6 @@ export default function FeedCard({
     setShareCopied(true)
     setTimeout(() => setShareCopied(false), 2000)
     
-    // Increment share count in database
     await supabase
       .from('user_feeds')
       .update({ shares_count: (post.shares_count || 0) + 1 })
@@ -278,6 +301,15 @@ export default function FeedCard({
     }
   }
 
+  // Toggle video mute
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (videoRef.current) {
+      videoRef.current.muted = !videoMuted
+      setVideoMuted(!videoMuted)
+    }
+  }
+
   // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -306,10 +338,10 @@ export default function FeedCard({
   const tags = post.tags || []
 
   return (
-    <article className="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4 w-full max-w-2xl mx-auto transition-all duration-200">
+    <article className="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4 w-full max-w-2xl mx-auto transition-all duration-200 overflow-hidden">
       
       {/* ========== HEADER ========== */}
-      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+      <div className="px-4 pt-3 pb-2">
         <div className="flex items-center gap-3">
           <Link href={`/profile/${creator?.username}`}>
             <div className="relative">
@@ -327,16 +359,28 @@ export default function FeedCard({
                   {creator?.display_name?.[0]?.toUpperCase() || 'U'}
                 </div>
               )}
-              {/* Online indicator */}
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
             </div>
           </Link>
-          <div>
-            <Link href={`/profile/${creator?.username}`}>
-              <p className="font-semibold text-gray-900 hover:underline text-sm">
-                {creator?.display_name}
-              </p>
-            </Link>
+          
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center flex-wrap gap-1">
+              <Link href={`/profile/${creator?.username}`}>
+                <p className="font-semibold text-gray-900 hover:underline text-sm">
+                  {creator?.display_name}
+                </p>
+              </Link>
+              
+              {/* Feeling - small, next to username */}
+              {post.feeling && (
+                <span className="text-xs text-gray-500 flex items-center gap-0.5">
+                  <span>is feeling</span>
+                  <span className="font-medium text-gray-700">{post.feeling}</span>
+                  <span>{post.feeling_emoji}</span>
+                </span>
+              )}
+            </div>
+            
             <div className="flex items-center gap-1 text-xs text-gray-400">
               <span>{timeAgo(post.created_at)}</span>
               {post.location && (
@@ -350,62 +394,53 @@ export default function FeedCard({
               <span>🌐</span>
             </div>
           </div>
-        </div>
-        
-        {/* Menu Button */}
-        <div className="relative" ref={menuRef}>
-          <button
-            onClick={() => setShowMenu(!showMenu)}
-            className="p-2 rounded-full hover:bg-gray-100 transition active:scale-95"
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
-          >
-            <MoreHorizontal className="h-5 w-5 text-gray-500" />
-          </button>
-          {showMenu && (
-            <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-10 animate-fade-in">
-              {isOwner ? (
-                <>
-                  <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
-                    <Edit2 className="h-4 w-4" />
-                    Edit Post
-                  </button>
-                  <button 
-                    onClick={handleDeletePost}
-                    className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Delete Post
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
-                    <Bookmark className="h-4 w-4" />
-                    Save Post
-                  </button>
-                  <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
-                    <Flag className="h-4 w-4" />
-                    Report
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+          
+          {/* Menu Button */}
+          <div className="relative flex-shrink-0" ref={menuRef}>
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="p-2 rounded-full hover:bg-gray-100 transition active:scale-95"
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+            >
+              <MoreHorizontal className="h-5 w-5 text-gray-500" />
+            </button>
+            {showMenu && (
+              <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-10 animate-fade-in">
+                {isOwner ? (
+                  <>
+                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                      <Edit2 className="h-4 w-4" />
+                      Edit Post
+                    </button>
+                    <button 
+                      onClick={handleDeletePost}
+                      className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete Post
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                      <Bookmark className="h-4 w-4" />
+                      Save Post
+                    </button>
+                    <button className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition">
+                      <Flag className="h-4 w-4" />
+                      Report
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ========== FEELING ========== */}
-      {post.feeling && (
-        <div className="px-4 mb-2">
-          <span className="text-sm text-gray-500">
-            is feeling <span className="font-medium">{post.feeling}</span> {post.feeling_emoji}
-          </span>
-        </div>
-      )}
-
       {/* ========== CONTENT ========== */}
-      <div className="px-4 mb-3" ref={postContentRef}>
+      <div className="px-4 mb-3">
         {post.title && (
           <h3 className="text-lg font-bold text-gray-900 mb-2">{post.title}</h3>
         )}
@@ -441,31 +476,44 @@ export default function FeedCard({
         </div>
       )}
 
-      {/* ========== MEDIA ========== */}
+      {/* ========== MEDIA - Responsive Video ========== */}
       {post.media_url && (
-        <div className="mb-2">
-          <div className="relative bg-gray-100">
-            {post.media_type === 'image' ? (
+        <div className="mb-2 bg-black/5">
+          {post.media_type === 'image' ? (
+            <div className="relative">
               <img
                 src={post.media_url}
                 alt="Post"
                 className="w-full max-h-[500px] object-contain cursor-pointer hover:opacity-95 transition"
                 onClick={() => window.open(post.media_url, '_blank')}
               />
-            ) : post.media_type === 'video' ? (
+            </div>
+          ) : post.media_type === 'video' ? (
+            <div className="relative w-full">
               <video
+                ref={videoRef}
                 src={post.media_url}
-                controls
                 className="w-full max-h-[500px] object-contain"
+                autoPlay
+                muted
+                loop
+                playsInline
                 poster="/video-placeholder.jpg"
               />
-            ) : null}
-          </div>
+              {/* Mute/Unmute button */}
+              <button
+                onClick={toggleMute}
+                className="absolute bottom-3 right-3 p-2 bg-black/50 rounded-full text-white hover:bg-black/70 transition"
+              >
+                {videoMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 
       {/* ========== STATS ========== */}
-      <div className="px-4 py-2 flex items-center justify-between text-xs text-gray-400 border-b border-gray-100">
+      <div className="px-4 py-2 flex items-center justify-between text-xs text-gray-400 border-t border-gray-100">
         <div className="flex items-center gap-1">
           <div className="flex -space-x-1">
             <ThumbsUp className="h-3 w-3 fill-blue-500 text-blue-500" />
@@ -494,7 +542,7 @@ export default function FeedCard({
       </div>
 
       {/* ========== ACTION BUTTONS ========== */}
-      <div className="flex items-center justify-around py-1">
+      <div className="flex items-center justify-around py-1 border-b border-gray-100">
         <button
           onClick={handleLikeClick}
           className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition active:scale-95 ${
@@ -561,7 +609,7 @@ export default function FeedCard({
 
       {/* ========== COMMENTS SECTION ========== */}
       {showComments && (
-        <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 rounded-b-2xl">
+        <div className="px-4 py-3 bg-gray-50">
           {/* Comment Input */}
           <div className="flex items-center gap-2 mb-3">
             {currentUserId && (
