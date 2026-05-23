@@ -300,16 +300,31 @@ export default function Page() {
       `}</style>
 
       <div className="ff-root">
-        <div className="ff-container">
+       
+
+
+
+<div className="ff-container">
+  {/* Spacer to push content down */}
+  <div className="h-8 md:h-12 lg:h-16" />
+
+          
           {/* Logo */}
           <div className="ff-logo-wrap">
             <div className="ff-icon">
               <img src="/logo.png" alt="FaceForge" style={{ width: '120px', height: '120px', objectFit: 'contain' }} />
             </div>
-           
+            <div className="ff-brand">
+              <span className="ff-brand-face">Face</span><span className="ff-brand-forge">Forge</span>
+            </div>
+            <p className="ff-tagline">build your identity, shape your world.</p>
           </div>
 
-         
+          {/* Welcome */}
+          <div className="ff-welcome">
+            <h1 className="ff-welcome-title">welcome back</h1>
+            <p className="ff-welcome-sub">log in to continue building</p>
+          </div>
 
           {/* Form — no typing field borders, just thin line */}
           <form className="ff-form" onSubmit={handleLogin}>
