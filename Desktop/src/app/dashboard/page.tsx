@@ -5,8 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell, Sparkles, Users, Home, Compass, Clock,
-  Film, Heart, Briefcase, Gamepad2, Trophy, Globe, Code, Palette
+  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell, Sparkles, Users, Home, Compass
 } from 'lucide-react'
 import Link from 'next/link'
 import ThreeCurveFab from '@/components/dashboard/layout/three-curve-fab'
@@ -23,19 +22,6 @@ import FeedCard from '@/components/dashboard/cards/feed-card'
 import CardSkeleton from '@/components/dashboard/cards/card-skeleton'
 import CommentPanel from '@/components/dashboard/comments/comment-panel'
 import ArticleReader from '@/components/dashboard/news/ArticleReader'
-
-// News categories
-const NEWS_CATEGORIES = [
-  { id: 'all', name: 'For You', icon: Sparkles, color: 'text-purple-500' },
-  { id: 'technology', name: 'Tech', icon: Code, color: 'text-blue-500' },
-  { id: 'entertainment', name: 'Entertainment', icon: Film, color: 'text-pink-500' },
-  { id: 'lifestyle', name: 'Lifestyle', icon: Heart, color: 'text-red-500' },
-  { id: 'business', name: 'Business', icon: Briefcase, color: 'text-green-500' },
-  { id: 'gaming', name: 'Gaming', icon: Gamepad2, color: 'text-indigo-500' },
-  { id: 'sports', name: 'Sports', icon: Trophy, color: 'text-yellow-500' },
-  { id: 'world', name: 'World', icon: Globe, color: 'text-cyan-500' },
-  { id: 'creators', name: 'Creator Hub', icon: Palette, color: 'text-orange-500' },
-]
 
 // Helper for time ago
 function timeAgo(date: string | Date): string {
@@ -80,7 +66,6 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'forYou' | 'following'>('forYou')
   const [commentPanel, setCommentPanel] = useState<{ articleId?: string; forgeId?: string; feedId?: string } | null>(null)
   const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
-  const [selectedCategory, setSelectedCategory] = useState<string>('all')
   
   // ── State for Auto-Refresh & Infinite Scroll ───────────────────────────
   const [displayedNews, setDisplayedNews] = useState<NewsArticle[]>([])
@@ -91,157 +76,10 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [showRefreshToast, setShowRefreshToast] = useState(false)
-  const [showRefreshButton, setShowRefreshButton] = useState(false)
-  const [newArticlesCount, setNewArticlesCount] = useState(0)
   const observerTarget = useRef<HTMLDivElement>(null)
-  const newsContainerRef = useRef<HTMLDivElement>(null)
-  const ITEMS_PER_PAGE = 10
 
   // ✅ FIX: Use ref for subscription instead of state
   const subscriptionRef = useRef<any>(null)
-
-  // ── Load News with Category Support ──────────────────────────────────────────
-  const loadNews = useCallback(async (pageNum: number, category: string = 'all', isRefresh = false) => {
-    if (isRefresh) {
-      setRefreshing(true)
-    } else if (pageNum === 1) {
-      setNewsLoading(true)
-    }
-    
-    try {
-      const bustParam = isRefresh ? `&bust=${Date.now()}` : ''
-      const res = await fetch(`/api/news?page=${pageNum}&limit=${ITEMS_PER_PAGE}&category=${category}${bustParam}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      
-      const articles: NewsArticle[] = (data.articles || []).map((a: any, index: number) => ({
-        id: a.id || `${Date.now()}_${index}_${Math.random()}`,
-        title: a.title,
-        description: a.description || '',
-        url: a.url,
-        urlToImage: a.urlToImage || null,
-        source: a.source || { name: a.category || category },
-        publishedAt: a.publishedAt || new Date().toISOString(),
-        category: a.category || category,
-        isNew: isRefresh && index < 3
-      }))
-      
-      if (isRefresh || pageNum === 1) {
-        // Count new articles from last hour
-        const now = new Date()
-        const newCount = articles.filter(a => {
-          const pubDate = new Date(a.publishedAt)
-          const diffMinutes = (now.getTime() - pubDate.getTime()) / 1000 / 60
-          return diffMinutes < 60
-        }).length
-        
-        setNewArticlesCount(newCount)
-        setNewsItems(articles)
-        setDisplayedNews(articles.slice(0, ITEMS_PER_PAGE))
-        setNewsPage(1)
-        setHasMoreNews(articles.length >= ITEMS_PER_PAGE)
-        setLastUpdated(new Date())
-        setShowRefreshButton(false)
-        
-        if (user) {
-          const ids = articles.slice(0, ITEMS_PER_PAGE).map(a => a.id)
-          if (ids.length) {
-            const [{ data: likes }, { data: cmts }] = await Promise.all([
-              supabase.from('news_likes').select('article_id').eq('user_id', user.id).in('article_id', ids),
-              supabase.from('news_comments').select('article_id').in('article_id', ids),
-            ])
-            setLikedNews(new Set((likes || []).map((l: any) => l.article_id)))
-            const cc: Record<string, number> = {}
-            ;(cmts || []).forEach((c: any) => { cc[c.article_id] = (cc[c.article_id] || 0) + 1 })
-            setNewsCC(cc)
-          }
-        }
-      } else {
-        // Append for infinite scroll
-        const newArticles = articles.filter(a => !newsItems.some(n => n.id === a.id))
-        setNewsItems(prev => [...prev, ...newArticles])
-        setDisplayedNews(prev => [...prev, ...newArticles])
-        setHasMoreNews(articles.length >= ITEMS_PER_PAGE)
-      }
-    } catch (e) {
-      console.error('[News Error]', e)
-    } finally {
-      setNewsLoading(false)
-      setRefreshing(false)
-    }
-  }, [supabase, user, newsItems])
-
-  // ── Background Real-time Check ─────────────────────────────────────────
-  useEffect(() => {
-    if (!user) return
-    
-    const checkForNewNews = async () => {
-      if (document.hidden) return
-      
-      try {
-        const since = lastUpdated ? lastUpdated.toISOString() : new Date(Date.now() - 60000).toISOString()
-        const res = await fetch(`/api/news?since=${since}&category=${selectedCategory}`)
-        const data = await res.json()
-        
-        const newArticles = (data.articles || []).filter((a: any) => {
-          const pubDate = new Date(a.publishedAt)
-          return pubDate > (lastUpdated || new Date(Date.now() - 60000))
-        })
-        
-        if (newArticles.length > 0 && !showRefreshButton) {
-          setNewArticlesCount(prev => prev + newArticles.length)
-          setShowRefreshButton(true)
-        }
-      } catch (error) {
-        console.error('Background check failed:', error)
-      }
-    }
-    
-    const interval = setInterval(checkForNewNews, 30000)
-    return () => clearInterval(interval)
-  }, [user, lastUpdated, showRefreshButton, selectedCategory])
-
-  // ── Handle Manual Refresh ──────────────────────────────────────────────
-  const handleRefresh = async () => {
-    if (refreshing) return
-    await loadNews(1, selectedCategory, true)
-    
-    if (newsContainerRef.current) {
-      newsContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-    
-    setShowRefreshToast(true)
-    setTimeout(() => setShowRefreshToast(false), 2000)
-  }
-
-  // ── Handle Category Change ──────────────────────────────────────────────
-  const handleCategoryChange = (categoryId: string) => {
-    setSelectedCategory(categoryId)
-    setShowAllNews(false)
-    loadNews(1, categoryId, true)
-  }
-
-  // ── Infinite Scroll Observer ──────────────────────────────────────────
-  useEffect(() => {
-    if (showAllNews) return
-    
-    const observer = new IntersectionObserver(
-      async (entries) => {
-        if (entries[0].isIntersecting && hasMoreNews && !newsLoading && !refreshing) {
-          const nextPage = newsPage + 1
-          setNewsPage(nextPage)
-          await loadNews(nextPage, selectedCategory, false)
-        }
-      },
-      { threshold: 0.1, rootMargin: '100px' }
-    )
-
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current)
-    }
-
-    return () => observer.disconnect()
-  }, [hasMoreNews, newsLoading, refreshing, newsPage, loadNews, showAllNews, selectedCategory])
 
   // ── Load Following Feed Posts ──────────────────────────────────────────
   const loadFollowingFeedPosts = useCallback(async () => {
@@ -308,6 +146,115 @@ export default function DashboardPage() {
     }
   }, [supabase, user, following])
 
+  // ── Load News ──────────────────────────────────────────────────────────
+  const loadNews = useCallback(async (currentUser: any, forceRefresh = false) => {
+    setNewsLoading(true)
+    try {
+      const bustParam = forceRefresh ? `?bust=${Date.now()}` : ''
+      const res = await fetch(`/api/news${bustParam}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      
+      const articles: NewsArticle[] = (data.articles || []).map((a: any) => ({
+        id: a.id,
+        title: a.title,
+        description: a.description || '',
+        url: a.url,
+        urlToImage: a.urlToImage || null,
+        source: a.source || { name: 'News' },
+        publishedAt: a.publishedAt,
+      }))
+      
+      setNewsItems(articles)
+      setLastUpdated(new Date())
+
+      if (currentUser && articles.length) {
+        const ids = articles.map(a => a.id)
+        const [{ data: likes }, { data: cmts }] = await Promise.all([
+          supabase.from('news_likes').select('article_id').eq('user_id', currentUser.id).in('article_id', ids),
+          supabase.from('news_comments').select('article_id').in('article_id', ids),
+        ])
+        setLikedNews(new Set((likes || []).map((l: any) => l.article_id)))
+        const cc: Record<string, number> = {}
+        ;(cmts || []).forEach((c: any) => { cc[c.article_id] = (cc[c.article_id] || 0) + 1 })
+        setNewsCC(cc)
+      }
+    } catch (e) {
+      console.error('[News Error]', e)
+    } finally {
+      setNewsLoading(false)
+    }
+  }, [supabase])
+
+  // ── Auto-Refresh News ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (user) {
+        refreshNews()
+      }
+    }, 2 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [user])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user) {
+        refreshNews()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [user])
+
+  const refreshNews = useCallback(async () => {
+    if (refreshing || !user) return
+    setRefreshing(true)
+    try {
+      await loadNews(user, true)
+      setShowRefreshToast(true)
+      setTimeout(() => setShowRefreshToast(false), 2000)
+    } catch (error) {
+      console.error('Failed to refresh news:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [refreshing, user, loadNews])
+
+  // ── Update displayed news ─────────────────────────────────────────────
+  useEffect(() => {
+    if (newsItems.length > 0) {
+      const initialCount = showAllNews ? newsItems.length : Math.min(5, newsItems.length)
+      setDisplayedNews(newsItems.slice(0, initialCount))
+      setHasMoreNews(!showAllNews && newsItems.length > initialCount)
+      setNewsPage(1)
+    }
+  }, [newsItems, showAllNews])
+
+  // ── Infinite scroll observer ──────────────────────────────────────────────
+  useEffect(() => {
+    if (showAllNews) return
+    
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMoreNews && !newsLoading && newsItems.length > 0) {
+          const nextPage = newsPage + 1
+          const itemsToShow = nextPage * 5
+          const nextItems = newsItems.slice(0, itemsToShow)
+          setDisplayedNews(nextItems)
+          setNewsPage(nextPage)
+          setHasMoreNews(nextItems.length < newsItems.length)
+        }
+      },
+      { threshold: 0.1, rootMargin: '100px' }
+    )
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current)
+    }
+
+    return () => observer.disconnect()
+  }, [hasMoreNews, newsLoading, newsPage, newsItems, showAllNews])
+
   // ── Reload following feed when following changes ──────────────────────────
   useEffect(() => {
     if (user) {
@@ -315,7 +262,7 @@ export default function DashboardPage() {
     }
   }, [following, user, loadFollowingFeedPosts])
 
-  // ✅ FIXED: REAL-TIME SUBSCRIPTION
+  // ✅ FIXED: REAL-TIME SUBSCRIPTION - Using ref instead of state
   useEffect(() => {
     if (!user) return
 
@@ -324,6 +271,7 @@ export default function DashboardPage() {
     
     if (allUserIds.length === 0) return
 
+    // Clean up previous subscription if exists
     if (subscriptionRef.current) {
       supabase.removeChannel(subscriptionRef.current)
     }
@@ -339,6 +287,8 @@ export default function DashboardPage() {
           filter: `user_id=in.(${allUserIds.join(',')})`
         },
         async (payload) => {
+          console.log('📝 New post received in real-time:', payload.new)
+          
           const { data: profile } = await supabase
             .from('profiles')
             .select('id, username, display_name, avatar_url')
@@ -355,10 +305,37 @@ export default function DashboardPage() {
           setTimeout(() => setShowRefreshToast(false), 2000)
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'user_feeds'
+        },
+        (payload) => {
+          console.log('🗑️ Post deleted:', payload.old)
+          setFollowingFeedPosts(prev => prev.filter(post => post.id !== payload.old.id))
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'user_feeds'
+        },
+        (payload) => {
+          console.log('✏️ Post updated:', payload.new)
+          setFollowingFeedPosts(prev => prev.map(post => 
+            post.id === payload.new.id ? { ...post, ...payload.new } : post
+          ))
+        }
+      )
       .subscribe()
 
     subscriptionRef.current = subscription
 
+    // ✅ FIXED: Proper cleanup without using state
     return () => {
       if (subscriptionRef.current) {
         supabase.removeChannel(subscriptionRef.current)
@@ -370,6 +347,7 @@ export default function DashboardPage() {
   // ── Listen for manual post created events ──
   useEffect(() => {
     const handlePostCreated = (event: any) => {
+      console.log('🔄 Manual post refresh triggered', event.detail)
       loadFollowingFeedPosts()
     }
     
@@ -418,7 +396,7 @@ export default function DashboardPage() {
         const { data: liked } = await supabase.from('interactions').select('forge_id').eq('user_id', au.id).eq('interaction_type', 'like')
         setLikedForges(new Set((liked || []).map((i: any) => i.forge_id)))
 
-        await loadNews(1, 'all', true)
+        await loadNews(au)
         
         setLoading(false)
       } catch (e) {
@@ -481,6 +459,7 @@ export default function DashboardPage() {
     console.log('Searching for tag:', tag)
   }
 
+  // Article reader navigation
   const handleReadInside = (article: NewsArticle, index: number) => {
     setCurrentArticleIndex(index)
     setSelectedArticle(article)
@@ -560,37 +539,11 @@ export default function DashboardPage() {
           {/* ── TAB 1: FOR YOU (NEWS ONLY) ─────────────────────────────────── */}
           {activeTab === 'forYou' && (
             <>
-              {/* Category Tabs - Horizontal Scroll */}
-              <div className="overflow-x-auto scrollbar-hide">
-                <div className="flex gap-1 pb-2 min-w-max">
-                  {NEWS_CATEGORIES.map((category) => (
-                    <button
-                      key={category.id}
-                      onClick={() => handleCategoryChange(category.id)}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap ${
-                        selectedCategory === category.id
-                          ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-md'
-                          : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-100'
-                      }`}
-                    >
-                      <category.icon className={`h-4 w-4 ${selectedCategory === category.id ? 'text-white' : category.color}`} />
-                      {category.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Trending Tags Section */}
               <div className="overflow-hidden">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="h-3.5 w-3.5 text-orange-500" />
-                    <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest">Trending Now</span>
-                  </div>
-                  <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    Live updates
-                  </span>
+                <div className="flex items-center gap-2 mb-3">
+                  <TrendingUp className="h-3.5 w-3.5 text-orange-500" />
+                  <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest">Trending Now</span>
                 </div>
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-2">
                   {TRENDING.map(tag => (
@@ -606,37 +559,28 @@ export default function DashboardPage() {
               </div>
 
               {/* News Feed Section */}
-              <section ref={newsContainerRef}>
+              <section>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <Flame className="h-5 w-5 text-orange-500" />
-                    <h2 className="text-sm font-black text-gray-900 uppercase tracking-tight">
-                      {NEWS_CATEGORIES.find(c => c.id === selectedCategory)?.name || 'Top Stories'}
-                    </h2>
+                    <h2 className="text-sm font-black text-gray-900 uppercase tracking-tight">Top Stories</h2>
                     {lastUpdated && (
                       <span className="text-[10px] text-gray-400 ml-2">
                         Updated {timeAgo(lastUpdated)} ago
                       </span>
                     )}
                   </div>
-                  
                   <div className="flex items-center gap-2">
-                    {/* Smart Refresh Button */}
-                    {showRefreshButton && (
-                      <button
-                        onClick={handleRefresh}
-                        disabled={refreshing}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-xs font-bold shadow-lg animate-pulse hover:opacity-90 transition disabled:animate-none"
-                      >
-                        <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-                        {newArticlesCount} new {newArticlesCount === 1 ? 'story' : 'stories'}
-                      </button>
-                    )}
-                    
                     <button 
-                      onClick={() => setShowAllNews(!showAllNews)} 
-                      className="text-xs font-bold text-orange-500 hover:text-orange-600"
+                      onClick={refreshNews}
+                      disabled={refreshing}
+                      className={`p-1.5 rounded-full transition ${
+                        refreshing ? 'animate-spin text-orange-500' : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50'
+                      }`}
                     >
+                      <RefreshCw className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => setShowAllNews(!showAllNews)} className="text-xs font-bold text-orange-500">
                       {showAllNews ? 'Show Less' : 'See All'}
                     </button>
                   </div>
@@ -654,45 +598,19 @@ export default function DashboardPage() {
                       onComment={() => setCommentPanel({ articleId: article.id })}
                       onShare={() => handleShare(article.url, article.id)}
                       onReadInside={() => handleReadInside(article, idx)}
-                      isNew={article.isNew}
                     />
                   ))}
                   
                   {/* Infinite scroll observer */}
-                  {!showAllNews && hasMoreNews && !newsLoading && !refreshing && newsItems.length > 0 && (
+                  {!showAllNews && hasMoreNews && !newsLoading && newsItems.length > 0 && (
                     <div ref={observerTarget} className="flex justify-center py-4">
-                      <div className="flex items-center gap-2 text-gray-400">
-                        <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-xs">Loading more {NEWS_CATEGORIES.find(c => c.id === selectedCategory)?.name?.toLowerCase()} news...</span>
-                      </div>
+                      <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
                     </div>
                   )}
                   
-                  {/* Initial Loading State */}
-                  {newsLoading && displayedNews.length === 0 && (
-                    <div className="space-y-4">
-                      {[1, 2, 3].map(i => (
-                        <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 animate-pulse">
-                          <div className="h-48 bg-gray-200 rounded-xl mb-4" />
-                          <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-                          <div className="h-3 bg-gray-200 rounded w-1/2" />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  
-                  {/* Empty State */}
-                  {!newsLoading && displayedNews.length === 0 && (
-                    <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
-                      <div className="text-6xl mb-4">📭</div>
-                      <h3 className="font-bold text-gray-900 mb-1">No news in this category</h3>
-                      <p className="text-sm text-gray-500">Try another category or check back later</p>
-                      <button
-                        onClick={() => handleCategoryChange('all')}
-                        className="mt-4 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-medium"
-                      >
-                        View All News
-                      </button>
+                  {newsLoading && (
+                    <div className="flex justify-center py-8">
+                      <div className="w-8 h-8 border-3 border-gray-200 border-t-orange-500 rounded-full animate-spin" />
                     </div>
                   )}
                 </div>
