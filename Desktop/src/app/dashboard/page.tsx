@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell, Sparkles, Users, Home, Compass
+  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell, Sparkles, Users, Home, Compass, Clock
 } from 'lucide-react'
 import Link from 'next/link'
 import ThreeCurveFab from '@/components/dashboard/layout/three-curve-fab'
@@ -76,10 +76,162 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [showRefreshToast, setShowRefreshToast] = useState(false)
+  const [showRefreshButton, setShowRefreshButton] = useState(false)
+  const [newArticlesCount, setNewArticlesCount] = useState(0)
   const observerTarget = useRef<HTMLDivElement>(null)
+  const newsContainerRef = useRef<HTMLDivElement>(null)
+  const ITEMS_PER_PAGE = 10
 
   // ✅ FIX: Use ref for subscription instead of state
   const subscriptionRef = useRef<any>(null)
+
+  // ── Load News with Pagination ──────────────────────────────────────────
+  const loadNews = useCallback(async (pageNum: number, isRefresh = false) => {
+    if (isRefresh) {
+      setRefreshing(true)
+    } else {
+      setNewsLoading(true)
+    }
+    
+    try {
+      const bustParam = isRefresh ? `?bust=${Date.now()}` : `?page=${pageNum}`
+      const res = await fetch(`/api/news${bustParam}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      
+      const articles: NewsArticle[] = (data.articles || []).map((a: any, index: number) => ({
+        id: a.id || `${Date.now()}_${index}_${Math.random()}`,
+        title: a.title,
+        description: a.description || '',
+        url: a.url,
+        urlToImage: a.urlToImage || null,
+        source: a.source || { name: 'News' },
+        publishedAt: a.publishedAt || new Date().toISOString(),
+        isNew: isRefresh && index < 5
+      }))
+      
+      if (isRefresh) {
+        // Count new articles from last hour
+        const now = new Date()
+        const newCount = articles.filter(a => {
+          const pubDate = new Date(a.publishedAt)
+          const diffMinutes = (now.getTime() - pubDate.getTime()) / 1000 / 60
+          return diffMinutes < 60
+        }).length
+        
+        setNewArticlesCount(newCount)
+        setNewsItems(articles)
+        setDisplayedNews(articles.slice(0, ITEMS_PER_PAGE))
+        setNewsPage(1)
+        setHasMoreNews(articles.length > ITEMS_PER_PAGE)
+        setLastUpdated(new Date())
+        setShowRefreshButton(false)
+        
+        if (user) {
+          const ids = articles.slice(0, ITEMS_PER_PAGE).map(a => a.id)
+          if (ids.length) {
+            const [{ data: likes }, { data: cmts }] = await Promise.all([
+              supabase.from('news_likes').select('article_id').eq('user_id', user.id).in('article_id', ids),
+              supabase.from('news_comments').select('article_id').in('article_id', ids),
+            ])
+            setLikedNews(new Set((likes || []).map((l: any) => l.article_id)))
+            const cc: Record<string, number> = {}
+            ;(cmts || []).forEach((c: any) => { cc[c.article_id] = (cc[c.article_id] || 0) + 1 })
+            setNewsCC(cc)
+          }
+        }
+      } else {
+        // Append for infinite scroll
+        const newArticles = articles.filter(a => !newsItems.some(n => n.id === a.id))
+        setNewsItems(prev => [...prev, ...newArticles])
+        setDisplayedNews(prev => [...prev, ...newArticles])
+        setHasMoreNews(articles.length === ITEMS_PER_PAGE)
+      }
+    } catch (e) {
+      console.error('[News Error]', e)
+    } finally {
+      setNewsLoading(false)
+      setRefreshing(false)
+    }
+  }, [supabase, user, newsItems])
+
+  // ── Background Real-time Check ─────────────────────────────────────────
+  useEffect(() => {
+    if (!user) return
+    
+    const checkForNewNews = async () => {
+      if (document.hidden) return
+      
+      try {
+        const since = lastUpdated ? lastUpdated.toISOString() : new Date(Date.now() - 60000).toISOString()
+        const res = await fetch(`/api/news?since=${since}`)
+        const data = await res.json()
+        
+        const newArticles = (data.articles || []).filter((a: any) => {
+          const pubDate = new Date(a.publishedAt)
+          return pubDate > (lastUpdated || new Date(Date.now() - 60000))
+        })
+        
+        if (newArticles.length > 0 && !showRefreshButton) {
+          setNewArticlesCount(prev => prev + newArticles.length)
+          setShowRefreshButton(true)
+        }
+      } catch (error) {
+        console.error('Background check failed:', error)
+      }
+    }
+    
+    const interval = setInterval(checkForNewNews, 30000) // Check every 30 seconds
+    return () => clearInterval(interval)
+  }, [user, lastUpdated, showRefreshButton])
+
+  // ── Mock real-time simulation (remove in production with real API) ──
+  useEffect(() => {
+    if (!user) return
+    const mockInterval = setInterval(() => {
+      if (Math.random() > 0.85 && !showRefreshButton) {
+        setShowRefreshButton(true)
+        setNewArticlesCount(prev => prev + Math.floor(Math.random() * 2) + 1)
+      }
+    }, 45000)
+    return () => clearInterval(mockInterval)
+  }, [showRefreshButton, user])
+
+  // ── Handle Manual Refresh ──────────────────────────────────────────────
+  const handleRefresh = async () => {
+    if (refreshing) return
+    await loadNews(1, true)
+    
+    // Scroll to top smoothly
+    if (newsContainerRef.current) {
+      newsContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+    
+    setShowRefreshToast(true)
+    setTimeout(() => setShowRefreshToast(false), 2000)
+  }
+
+  // ── Infinite Scroll Observer ──────────────────────────────────────────
+  useEffect(() => {
+    if (showAllNews) return
+    
+    const observer = new IntersectionObserver(
+      async (entries) => {
+        if (entries[0].isIntersecting && hasMoreNews && !newsLoading && !refreshing) {
+          const nextPage = newsPage + 1
+          setNewsPage(nextPage)
+          await loadNews(nextPage, false)
+        }
+      },
+      { threshold: 0.1, rootMargin: '100px' }
+    )
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current)
+    }
+
+    return () => observer.disconnect()
+  }, [hasMoreNews, newsLoading, refreshing, newsPage, loadNews, showAllNews])
 
   // ── Load Following Feed Posts ──────────────────────────────────────────
   const loadFollowingFeedPosts = useCallback(async () => {
@@ -146,114 +298,16 @@ export default function DashboardPage() {
     }
   }, [supabase, user, following])
 
-  // ── Load News ──────────────────────────────────────────────────────────
-  const loadNews = useCallback(async (currentUser: any, forceRefresh = false) => {
-    setNewsLoading(true)
-    try {
-      const bustParam = forceRefresh ? `?bust=${Date.now()}` : ''
-      const res = await fetch(`/api/news${bustParam}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      
-      const articles: NewsArticle[] = (data.articles || []).map((a: any) => ({
-        id: a.id,
-        title: a.title,
-        description: a.description || '',
-        url: a.url,
-        urlToImage: a.urlToImage || null,
-        source: a.source || { name: 'News' },
-        publishedAt: a.publishedAt,
-      }))
-      
-      setNewsItems(articles)
-      setLastUpdated(new Date())
-
-      if (currentUser && articles.length) {
-        const ids = articles.map(a => a.id)
-        const [{ data: likes }, { data: cmts }] = await Promise.all([
-          supabase.from('news_likes').select('article_id').eq('user_id', currentUser.id).in('article_id', ids),
-          supabase.from('news_comments').select('article_id').in('article_id', ids),
-        ])
-        setLikedNews(new Set((likes || []).map((l: any) => l.article_id)))
-        const cc: Record<string, number> = {}
-        ;(cmts || []).forEach((c: any) => { cc[c.article_id] = (cc[c.article_id] || 0) + 1 })
-        setNewsCC(cc)
-      }
-    } catch (e) {
-      console.error('[News Error]', e)
-    } finally {
-      setNewsLoading(false)
-    }
-  }, [supabase])
-
-  // ── Auto-Refresh News ─────────────────────────────────────────────────────
+  // ── Initial Displayed News Setup ───────────────────────────────────────
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (user) {
-        refreshNews()
-      }
-    }, 2 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [user])
-
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && user) {
-        refreshNews()
-      }
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [user])
-
-  const refreshNews = useCallback(async () => {
-    if (refreshing || !user) return
-    setRefreshing(true)
-    try {
-      await loadNews(user, true)
-      setShowRefreshToast(true)
-      setTimeout(() => setShowRefreshToast(false), 2000)
-    } catch (error) {
-      console.error('Failed to refresh news:', error)
-    } finally {
-      setRefreshing(false)
-    }
-  }, [refreshing, user, loadNews])
-
-  // ── Update displayed news ─────────────────────────────────────────────
-  useEffect(() => {
-    if (newsItems.length > 0) {
-      const initialCount = showAllNews ? newsItems.length : Math.min(5, newsItems.length)
-      setDisplayedNews(newsItems.slice(0, initialCount))
-      setHasMoreNews(!showAllNews && newsItems.length > initialCount)
-      setNewsPage(1)
+    if (newsItems.length > 0 && !showAllNews) {
+      setDisplayedNews(newsItems.slice(0, ITEMS_PER_PAGE))
+      setHasMoreNews(newsItems.length > ITEMS_PER_PAGE)
+    } else if (showAllNews) {
+      setDisplayedNews(newsItems)
+      setHasMoreNews(false)
     }
   }, [newsItems, showAllNews])
-
-  // ── Infinite scroll observer ──────────────────────────────────────────────
-  useEffect(() => {
-    if (showAllNews) return
-    
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMoreNews && !newsLoading && newsItems.length > 0) {
-          const nextPage = newsPage + 1
-          const itemsToShow = nextPage * 5
-          const nextItems = newsItems.slice(0, itemsToShow)
-          setDisplayedNews(nextItems)
-          setNewsPage(nextPage)
-          setHasMoreNews(nextItems.length < newsItems.length)
-        }
-      },
-      { threshold: 0.1, rootMargin: '100px' }
-    )
-
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current)
-    }
-
-    return () => observer.disconnect()
-  }, [hasMoreNews, newsLoading, newsPage, newsItems, showAllNews])
 
   // ── Reload following feed when following changes ──────────────────────────
   useEffect(() => {
@@ -335,7 +389,6 @@ export default function DashboardPage() {
 
     subscriptionRef.current = subscription
 
-    // ✅ FIXED: Proper cleanup without using state
     return () => {
       if (subscriptionRef.current) {
         supabase.removeChannel(subscriptionRef.current)
@@ -396,7 +449,7 @@ export default function DashboardPage() {
         const { data: liked } = await supabase.from('interactions').select('forge_id').eq('user_id', au.id).eq('interaction_type', 'like')
         setLikedForges(new Set((liked || []).map((i: any) => i.forge_id)))
 
-        await loadNews(au)
+        await loadNews(1, true)
         
         setLoading(false)
       } catch (e) {
@@ -541,9 +594,15 @@ export default function DashboardPage() {
             <>
               {/* Trending Tags Section */}
               <div className="overflow-hidden">
-                <div className="flex items-center gap-2 mb-3">
-                  <TrendingUp className="h-3.5 w-3.5 text-orange-500" />
-                  <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest">Trending Now</span>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="h-3.5 w-3.5 text-orange-500" />
+                    <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest">Trending Now</span>
+                  </div>
+                  <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Live updates
+                  </span>
                 </div>
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-2">
                   {TRENDING.map(tag => (
@@ -559,7 +618,7 @@ export default function DashboardPage() {
               </div>
 
               {/* News Feed Section */}
-              <section>
+              <section ref={newsContainerRef}>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <Flame className="h-5 w-5 text-orange-500" />
@@ -570,17 +629,24 @@ export default function DashboardPage() {
                       </span>
                     )}
                   </div>
+                  
                   <div className="flex items-center gap-2">
+                    {/* Smart Refresh Button */}
+                    {showRefreshButton && (
+                      <button
+                        onClick={handleRefresh}
+                        disabled={refreshing}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-xs font-bold shadow-lg animate-pulse hover:opacity-90 transition disabled:animate-none"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                        {newArticlesCount} new {newArticlesCount === 1 ? 'story' : 'stories'}
+                      </button>
+                    )}
+                    
                     <button 
-                      onClick={refreshNews}
-                      disabled={refreshing}
-                      className={`p-1.5 rounded-full transition ${
-                        refreshing ? 'animate-spin text-orange-500' : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50'
-                      }`}
+                      onClick={() => setShowAllNews(!showAllNews)} 
+                      className="text-xs font-bold text-orange-500 hover:text-orange-600"
                     >
-                      <RefreshCw className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => setShowAllNews(!showAllNews)} className="text-xs font-bold text-orange-500">
                       {showAllNews ? 'Show Less' : 'See All'}
                     </button>
                   </div>
@@ -598,19 +664,45 @@ export default function DashboardPage() {
                       onComment={() => setCommentPanel({ articleId: article.id })}
                       onShare={() => handleShare(article.url, article.id)}
                       onReadInside={() => handleReadInside(article, idx)}
+                      isNew={article.isNew}
                     />
                   ))}
                   
                   {/* Infinite scroll observer */}
-                  {!showAllNews && hasMoreNews && !newsLoading && newsItems.length > 0 && (
+                  {!showAllNews && hasMoreNews && !newsLoading && !refreshing && newsItems.length > 0 && (
                     <div ref={observerTarget} className="flex justify-center py-4">
-                      <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-xs">Loading more news...</span>
+                      </div>
                     </div>
                   )}
                   
-                  {newsLoading && (
-                    <div className="flex justify-center py-8">
-                      <div className="w-8 h-8 border-3 border-gray-200 border-t-orange-500 rounded-full animate-spin" />
+                  {/* Initial Loading State */}
+                  {newsLoading && displayedNews.length === 0 && (
+                    <div className="space-y-4">
+                      {[1, 2, 3].map(i => (
+                        <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 animate-pulse">
+                          <div className="h-48 bg-gray-200 rounded-xl mb-4" />
+                          <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
+                          <div className="h-3 bg-gray-200 rounded w-1/2" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Empty State */}
+                  {!newsLoading && displayedNews.length === 0 && (
+                    <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
+                      <div className="text-6xl mb-4">📭</div>
+                      <h3 className="font-bold text-gray-900 mb-1">No news yet</h3>
+                      <p className="text-sm text-gray-500">Pull down to refresh or check back later</p>
+                      <button
+                        onClick={handleRefresh}
+                        className="mt-4 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-medium"
+                      >
+                        Refresh Now
+                      </button>
                     </div>
                   )}
                 </div>
