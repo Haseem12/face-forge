@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell, Sparkles, Users, Home, Compass, Clock
+  Flame, TrendingUp, Zap, Plus, RefreshCw, Bell, Sparkles, Users, Home, Compass, Clock,
+  Film, Heart, Briefcase, Gamepad2, Trophy, Globe, Code, Palette
 } from 'lucide-react'
 import Link from 'next/link'
 import ThreeCurveFab from '@/components/dashboard/layout/three-curve-fab'
@@ -22,6 +23,19 @@ import FeedCard from '@/components/dashboard/cards/feed-card'
 import CardSkeleton from '@/components/dashboard/cards/card-skeleton'
 import CommentPanel from '@/components/dashboard/comments/comment-panel'
 import ArticleReader from '@/components/dashboard/news/ArticleReader'
+
+// News categories
+const NEWS_CATEGORIES = [
+  { id: 'all', name: 'For You', icon: Sparkles, color: 'text-purple-500' },
+  { id: 'technology', name: 'Tech', icon: Code, color: 'text-blue-500' },
+  { id: 'entertainment', name: 'Entertainment', icon: Film, color: 'text-pink-500' },
+  { id: 'lifestyle', name: 'Lifestyle', icon: Heart, color: 'text-red-500' },
+  { id: 'business', name: 'Business', icon: Briefcase, color: 'text-green-500' },
+  { id: 'gaming', name: 'Gaming', icon: Gamepad2, color: 'text-indigo-500' },
+  { id: 'sports', name: 'Sports', icon: Trophy, color: 'text-yellow-500' },
+  { id: 'world', name: 'World', icon: Globe, color: 'text-cyan-500' },
+  { id: 'creators', name: 'Creator Hub', icon: Palette, color: 'text-orange-500' },
+]
 
 // Helper for time ago
 function timeAgo(date: string | Date): string {
@@ -66,6 +80,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'forYou' | 'following'>('forYou')
   const [commentPanel, setCommentPanel] = useState<{ articleId?: string; forgeId?: string; feedId?: string } | null>(null)
   const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
   
   // ── State for Auto-Refresh & Infinite Scroll ───────────────────────────
   const [displayedNews, setDisplayedNews] = useState<NewsArticle[]>([])
@@ -85,17 +100,17 @@ export default function DashboardPage() {
   // ✅ FIX: Use ref for subscription instead of state
   const subscriptionRef = useRef<any>(null)
 
-  // ── Load News with Pagination ──────────────────────────────────────────
-  const loadNews = useCallback(async (pageNum: number, isRefresh = false) => {
+  // ── Load News with Category Support ──────────────────────────────────────────
+  const loadNews = useCallback(async (pageNum: number, category: string = 'all', isRefresh = false) => {
     if (isRefresh) {
       setRefreshing(true)
-    } else {
+    } else if (pageNum === 1) {
       setNewsLoading(true)
     }
     
     try {
-      const bustParam = isRefresh ? `?bust=${Date.now()}` : `?page=${pageNum}`
-      const res = await fetch(`/api/news${bustParam}`)
+      const bustParam = isRefresh ? `&bust=${Date.now()}` : ''
+      const res = await fetch(`/api/news?page=${pageNum}&limit=${ITEMS_PER_PAGE}&category=${category}${bustParam}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       
@@ -105,12 +120,13 @@ export default function DashboardPage() {
         description: a.description || '',
         url: a.url,
         urlToImage: a.urlToImage || null,
-        source: a.source || { name: 'News' },
+        source: a.source || { name: a.category || category },
         publishedAt: a.publishedAt || new Date().toISOString(),
-        isNew: isRefresh && index < 5
+        category: a.category || category,
+        isNew: isRefresh && index < 3
       }))
       
-      if (isRefresh) {
+      if (isRefresh || pageNum === 1) {
         // Count new articles from last hour
         const now = new Date()
         const newCount = articles.filter(a => {
@@ -123,7 +139,7 @@ export default function DashboardPage() {
         setNewsItems(articles)
         setDisplayedNews(articles.slice(0, ITEMS_PER_PAGE))
         setNewsPage(1)
-        setHasMoreNews(articles.length > ITEMS_PER_PAGE)
+        setHasMoreNews(articles.length >= ITEMS_PER_PAGE)
         setLastUpdated(new Date())
         setShowRefreshButton(false)
         
@@ -145,7 +161,7 @@ export default function DashboardPage() {
         const newArticles = articles.filter(a => !newsItems.some(n => n.id === a.id))
         setNewsItems(prev => [...prev, ...newArticles])
         setDisplayedNews(prev => [...prev, ...newArticles])
-        setHasMoreNews(articles.length === ITEMS_PER_PAGE)
+        setHasMoreNews(articles.length >= ITEMS_PER_PAGE)
       }
     } catch (e) {
       console.error('[News Error]', e)
@@ -164,7 +180,7 @@ export default function DashboardPage() {
       
       try {
         const since = lastUpdated ? lastUpdated.toISOString() : new Date(Date.now() - 60000).toISOString()
-        const res = await fetch(`/api/news?since=${since}`)
+        const res = await fetch(`/api/news?since=${since}&category=${selectedCategory}`)
         const data = await res.json()
         
         const newArticles = (data.articles || []).filter((a: any) => {
@@ -181,34 +197,28 @@ export default function DashboardPage() {
       }
     }
     
-    const interval = setInterval(checkForNewNews, 30000) // Check every 30 seconds
+    const interval = setInterval(checkForNewNews, 30000)
     return () => clearInterval(interval)
-  }, [user, lastUpdated, showRefreshButton])
-
-  // ── Mock real-time simulation (remove in production with real API) ──
-  useEffect(() => {
-    if (!user) return
-    const mockInterval = setInterval(() => {
-      if (Math.random() > 0.85 && !showRefreshButton) {
-        setShowRefreshButton(true)
-        setNewArticlesCount(prev => prev + Math.floor(Math.random() * 2) + 1)
-      }
-    }, 45000)
-    return () => clearInterval(mockInterval)
-  }, [showRefreshButton, user])
+  }, [user, lastUpdated, showRefreshButton, selectedCategory])
 
   // ── Handle Manual Refresh ──────────────────────────────────────────────
   const handleRefresh = async () => {
     if (refreshing) return
-    await loadNews(1, true)
+    await loadNews(1, selectedCategory, true)
     
-    // Scroll to top smoothly
     if (newsContainerRef.current) {
       newsContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
     }
     
     setShowRefreshToast(true)
     setTimeout(() => setShowRefreshToast(false), 2000)
+  }
+
+  // ── Handle Category Change ──────────────────────────────────────────────
+  const handleCategoryChange = (categoryId: string) => {
+    setSelectedCategory(categoryId)
+    setShowAllNews(false)
+    loadNews(1, categoryId, true)
   }
 
   // ── Infinite Scroll Observer ──────────────────────────────────────────
@@ -220,7 +230,7 @@ export default function DashboardPage() {
         if (entries[0].isIntersecting && hasMoreNews && !newsLoading && !refreshing) {
           const nextPage = newsPage + 1
           setNewsPage(nextPage)
-          await loadNews(nextPage, false)
+          await loadNews(nextPage, selectedCategory, false)
         }
       },
       { threshold: 0.1, rootMargin: '100px' }
@@ -231,7 +241,7 @@ export default function DashboardPage() {
     }
 
     return () => observer.disconnect()
-  }, [hasMoreNews, newsLoading, refreshing, newsPage, loadNews, showAllNews])
+  }, [hasMoreNews, newsLoading, refreshing, newsPage, loadNews, showAllNews, selectedCategory])
 
   // ── Load Following Feed Posts ──────────────────────────────────────────
   const loadFollowingFeedPosts = useCallback(async () => {
@@ -298,17 +308,6 @@ export default function DashboardPage() {
     }
   }, [supabase, user, following])
 
-  // ── Initial Displayed News Setup ───────────────────────────────────────
-  useEffect(() => {
-    if (newsItems.length > 0 && !showAllNews) {
-      setDisplayedNews(newsItems.slice(0, ITEMS_PER_PAGE))
-      setHasMoreNews(newsItems.length > ITEMS_PER_PAGE)
-    } else if (showAllNews) {
-      setDisplayedNews(newsItems)
-      setHasMoreNews(false)
-    }
-  }, [newsItems, showAllNews])
-
   // ── Reload following feed when following changes ──────────────────────────
   useEffect(() => {
     if (user) {
@@ -316,7 +315,7 @@ export default function DashboardPage() {
     }
   }, [following, user, loadFollowingFeedPosts])
 
-  // ✅ FIXED: REAL-TIME SUBSCRIPTION - Using ref instead of state
+  // ✅ FIXED: REAL-TIME SUBSCRIPTION
   useEffect(() => {
     if (!user) return
 
@@ -325,7 +324,6 @@ export default function DashboardPage() {
     
     if (allUserIds.length === 0) return
 
-    // Clean up previous subscription if exists
     if (subscriptionRef.current) {
       supabase.removeChannel(subscriptionRef.current)
     }
@@ -341,8 +339,6 @@ export default function DashboardPage() {
           filter: `user_id=in.(${allUserIds.join(',')})`
         },
         async (payload) => {
-          console.log('📝 New post received in real-time:', payload.new)
-          
           const { data: profile } = await supabase
             .from('profiles')
             .select('id, username, display_name, avatar_url')
@@ -357,32 +353,6 @@ export default function DashboardPage() {
           setFollowingFeedPosts(prev => [newPost, ...prev])
           setShowRefreshToast(true)
           setTimeout(() => setShowRefreshToast(false), 2000)
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'user_feeds'
-        },
-        (payload) => {
-          console.log('🗑️ Post deleted:', payload.old)
-          setFollowingFeedPosts(prev => prev.filter(post => post.id !== payload.old.id))
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'user_feeds'
-        },
-        (payload) => {
-          console.log('✏️ Post updated:', payload.new)
-          setFollowingFeedPosts(prev => prev.map(post => 
-            post.id === payload.new.id ? { ...post, ...payload.new } : post
-          ))
         }
       )
       .subscribe()
@@ -400,7 +370,6 @@ export default function DashboardPage() {
   // ── Listen for manual post created events ──
   useEffect(() => {
     const handlePostCreated = (event: any) => {
-      console.log('🔄 Manual post refresh triggered', event.detail)
       loadFollowingFeedPosts()
     }
     
@@ -449,7 +418,7 @@ export default function DashboardPage() {
         const { data: liked } = await supabase.from('interactions').select('forge_id').eq('user_id', au.id).eq('interaction_type', 'like')
         setLikedForges(new Set((liked || []).map((i: any) => i.forge_id)))
 
-        await loadNews(1, true)
+        await loadNews(1, 'all', true)
         
         setLoading(false)
       } catch (e) {
@@ -512,7 +481,6 @@ export default function DashboardPage() {
     console.log('Searching for tag:', tag)
   }
 
-  // Article reader navigation
   const handleReadInside = (article: NewsArticle, index: number) => {
     setCurrentArticleIndex(index)
     setSelectedArticle(article)
@@ -592,6 +560,26 @@ export default function DashboardPage() {
           {/* ── TAB 1: FOR YOU (NEWS ONLY) ─────────────────────────────────── */}
           {activeTab === 'forYou' && (
             <>
+              {/* Category Tabs - Horizontal Scroll */}
+              <div className="overflow-x-auto scrollbar-hide">
+                <div className="flex gap-1 pb-2 min-w-max">
+                  {NEWS_CATEGORIES.map((category) => (
+                    <button
+                      key={category.id}
+                      onClick={() => handleCategoryChange(category.id)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap ${
+                        selectedCategory === category.id
+                          ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-md'
+                          : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-100'
+                      }`}
+                    >
+                      <category.icon className={`h-4 w-4 ${selectedCategory === category.id ? 'text-white' : category.color}`} />
+                      {category.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Trending Tags Section */}
               <div className="overflow-hidden">
                 <div className="flex items-center justify-between mb-3">
@@ -622,7 +610,9 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <Flame className="h-5 w-5 text-orange-500" />
-                    <h2 className="text-sm font-black text-gray-900 uppercase tracking-tight">Top Stories</h2>
+                    <h2 className="text-sm font-black text-gray-900 uppercase tracking-tight">
+                      {NEWS_CATEGORIES.find(c => c.id === selectedCategory)?.name || 'Top Stories'}
+                    </h2>
                     {lastUpdated && (
                       <span className="text-[10px] text-gray-400 ml-2">
                         Updated {timeAgo(lastUpdated)} ago
@@ -673,7 +663,7 @@ export default function DashboardPage() {
                     <div ref={observerTarget} className="flex justify-center py-4">
                       <div className="flex items-center gap-2 text-gray-400">
                         <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-xs">Loading more news...</span>
+                        <span className="text-xs">Loading more {NEWS_CATEGORIES.find(c => c.id === selectedCategory)?.name?.toLowerCase()} news...</span>
                       </div>
                     </div>
                   )}
@@ -695,13 +685,13 @@ export default function DashboardPage() {
                   {!newsLoading && displayedNews.length === 0 && (
                     <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
                       <div className="text-6xl mb-4">📭</div>
-                      <h3 className="font-bold text-gray-900 mb-1">No news yet</h3>
-                      <p className="text-sm text-gray-500">Pull down to refresh or check back later</p>
+                      <h3 className="font-bold text-gray-900 mb-1">No news in this category</h3>
+                      <p className="text-sm text-gray-500">Try another category or check back later</p>
                       <button
-                        onClick={handleRefresh}
+                        onClick={() => handleCategoryChange('all')}
                         className="mt-4 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-medium"
                       >
-                        Refresh Now
+                        View All News
                       </button>
                     </div>
                   )}
