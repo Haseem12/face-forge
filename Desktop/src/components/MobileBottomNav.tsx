@@ -82,7 +82,7 @@ export default function MobileBottomNav() {
   const navItems = [
     { href: '/dashboard', icon: Home, label: 'Feed' },
     { href: '/search', icon: Search, label: 'Discover' },
-    { href: '/updates', icon: Smile, label: 'Updates', badge: true },
+    { href: '/fleex', icon: Smile, label: 'Fleex', badge: true },
     { href: '/messages', icon: MessageCircle, label: 'Messages', badge: unreadMessageCount > 0 },
     { href: '/profile', icon: CircleUser, label: 'Profile', isProfile: true },
   ]
