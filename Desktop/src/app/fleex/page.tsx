@@ -9,11 +9,10 @@ import Link from 'next/link'
 import {
   X, Heart, Share2, Bookmark, Volume2, VolumeX,
   RefreshCw, User, Music, MessageCircle,
-  Plus, Flame, Sparkles, ChevronLeft
+  Plus, Flame, Sparkles, ChevronLeft, Play
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
-// Video Categories for First-Time User
 const VIDEO_CATEGORIES = [
   'For You',
   'Technology', 
@@ -49,6 +48,7 @@ interface Fleex {
   display_name?: string
   username?: string
   avatar_url?: string
+  is_youtube?: boolean
 }
 
 export default function FleexPage() {
@@ -68,21 +68,20 @@ export default function FleexPage() {
   const [showComments, setShowComments] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [comments, setComments] = useState<any[]>([])
-  
-  // Category Selection State
+  const [selectedCategory, setSelectedCategory] = useState('For You')
   const [showCategoryModal, setShowCategoryModal] = useState(false)
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(['For You'])
-  const [tempCategories, setTempCategories] = useState<string[]>(['Technology', 'Music', 'Comedy'])
-  const [hasSetInterests, setHasSetInterests] = useState(false)
+  const [tempCategory, setTempCategory] = useState('For You')
+  const [hasSetInterest, setHasSetInterest] = useState(false)
   
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
+  const iframeRefs = useRef<(HTMLIFrameElement | null)[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const observerTarget = useRef<HTMLDivElement>(null)
-  const ITEMS_PER_PAGE = 10
+  const ITEMS_PER_PAGE = 8
 
-  // Fetch current user and check interests
+  // Check user interests on load
   useEffect(() => {
-    const getUser = async () => {
+    const checkUserInterests = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         router.push('/auth/login')
@@ -90,139 +89,75 @@ export default function FleexPage() {
       }
       setCurrentUser(user)
       
-      // Check if user has selected categories before
       const { data: interests } = await supabase
         .from('user_interests')
-        .select('categories')
+        .select('category')
         .eq('user_id', user.id)
         .single()
       
-      if (interests && interests.categories && interests.categories.length > 0) {
-        setSelectedCategories(interests.categories)
-        setHasSetInterests(true)
-        await fetchFleex(1, interests.categories)
+      if (interests?.category) {
+        setSelectedCategory(interests.category)
+        setHasSetInterest(true)
+        await fetchFleex(1, interests.category)
       } else {
         setShowCategoryModal(true)
         setLoading(false)
       }
     }
-    getUser()
+    checkUserInterests()
   }, [supabase, router])
 
-  // Fetch fleex based on categories (not just following)
-  const fetchFleex = async (pageNum: number, categories: string[], refresh = false) => {
+  const fetchFleex = async (pageNum: number, category: string, refresh = false) => {
     if (refresh) setRefreshing(true)
     if (pageNum === 1) setLoading(true)
     
     try {
-      if (!currentUser) return
-      
-      // Build search query from categories
-      let searchQuery = ''
-      if (categories.includes('For You')) {
-        searchQuery = 'viral trending popular'
-      } else {
-        searchQuery = categories.join(' ')
-      }
-      
-      // Fetch from your API endpoint that gets videos by category
-      const response = await fetch(`/api/fleex/feed?page=${pageNum}&limit=${ITEMS_PER_PAGE}&q=${encodeURIComponent(searchQuery)}`)
-      
-      if (!response.ok) throw new Error('Failed to fetch')
-      
+      const response = await fetch(`/api/fleex/feed?page=${pageNum}&limit=${ITEMS_PER_PAGE}&category=${encodeURIComponent(category)}`)
       const data = await response.json()
-      const fleexData = data.fleex || []
-      
-      if (fleexData.length === 0 && pageNum === 1) {
-        setFleex([])
-        setHasMore(false)
-        setLoading(false)
-        return
-      }
-      
-      // Get unique user IDs
-      const uniqueUserIds = [...new Set(fleexData.map((f: any) => f.user_id))]
-      
-      // Fetch profiles
-      const { data: profilesData } = await supabase
-        .from('profiles')
-        .select('id, display_name, username, avatar_url')
-        .in('id', uniqueUserIds)
-      
-      const profileMap = new Map()
-      profilesData?.forEach(profile => {
-        profileMap.set(profile.id, profile)
-      })
-      
-      // Merge data
-      const mergedFleex = fleexData.map((f: any) => ({
-        ...f,
-        display_name: profileMap.get(f.user_id)?.display_name || 'User',
-        username: profileMap.get(f.user_id)?.username,
-        avatar_url: profileMap.get(f.user_id)?.avatar_url
-      }))
       
       if (pageNum === 1 || refresh) {
-        setFleex(mergedFleex)
+        setFleex(data.fleex || [])
         setPage(1)
       } else {
-        setFleex(prev => [...prev, ...mergedFleex])
+        setFleex(prev => [...prev, ...(data.fleex || [])])
       }
       
-      setHasMore(mergedFleex.length === ITEMS_PER_PAGE)
-      
-      // Get user's likes and saves
-      if (currentUser && mergedFleex.length) {
-        const fleexIds = mergedFleex.map((f: any) => f.id)
-        const [{ data: likes }, { data: saves }] = await Promise.all([
-          supabase.from('fleex_likes').select('fleex_id').eq('user_id', currentUser.id).in('fleex_id', fleexIds),
-          supabase.from('fleex_saves').select('fleex_id').eq('user_id', currentUser.id).in('fleex_id', fleexIds)
-        ])
-        
-        setLikedFleex(new Set(likes?.map(l => l.fleex_id) || []))
-        setSavedFleex(new Set(saves?.map(s => s.fleex_id) || []))
-      }
+      setHasMore(data.hasMore || false)
     } catch (error) {
       console.error('Error fetching fleex:', error)
-      // Fallback to mock data
-      if (pageNum === 1) {
-        setFleex(getMockFleex(categories))
-        setHasMore(false)
-      }
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
   }
 
-  // Save user interests
-  const saveInterests = async () => {
+  const saveUserInterest = async () => {
     if (!currentUser) return
     
     await supabase
       .from('user_interests')
       .upsert({
         user_id: currentUser.id,
-        categories: tempCategories,
+        category: tempCategory,
         updated_at: new Date().toISOString()
       })
     
-    setSelectedCategories(tempCategories)
-    setHasSetInterests(true)
+    setSelectedCategory(tempCategory)
+    setHasSetInterest(true)
     setShowCategoryModal(false)
-    await fetchFleex(1, tempCategories)
+    await fetchFleex(1, tempCategory)
   }
 
   // Infinite scroll
   useEffect(() => {
-    if (!hasSetInterests) return
+    if (!hasSetInterest) return
     
     const observer = new IntersectionObserver(
       async (entries) => {
         if (entries[0].isIntersecting && hasMore && !loading && !refreshing) {
           const nextPage = page + 1
           setPage(nextPage)
-          await fetchFleex(nextPage, selectedCategories)
+          await fetchFleex(nextPage, selectedCategory)
         }
       },
       { threshold: 0.1, rootMargin: '100px' }
@@ -233,9 +168,9 @@ export default function FleexPage() {
     }
     
     return () => observer.disconnect()
-  }, [hasMore, loading, refreshing, page, hasSetInterests, selectedCategories])
+  }, [hasMore, loading, refreshing, page, hasSetInterest, selectedCategory])
 
-  // Video scroll handling
+  // Video scroll handling with autoplay
   const handleScroll = useCallback(() => {
     if (!containerRef.current) return
     
@@ -244,13 +179,20 @@ export default function FleexPage() {
     const newIndex = Math.round(scrollTop / videoHeight)
     
     if (newIndex !== currentIndex && newIndex >= 0 && newIndex < fleex.length) {
-      const prevVideo = videoRefs.current[currentIndex]
-      if (prevVideo) prevVideo.pause()
+      // Pause all videos
+      videoRefs.current.forEach(video => {
+        if (video) video.pause()
+      })
       
       setCurrentIndex(newIndex)
       
-      const newVideo = videoRefs.current[newIndex]
-      if (newVideo) newVideo.play().catch(e => console.log('Play error:', e))
+      // Play new video after a small delay
+      setTimeout(() => {
+        const newVideo = videoRefs.current[newIndex]
+        if (newVideo) {
+          newVideo.play().catch(e => console.log('Play error:', e))
+        }
+      }, 100)
     }
   }, [currentIndex, fleex.length])
 
@@ -262,6 +204,7 @@ export default function FleexPage() {
     }
   }, [handleScroll])
 
+  // Autoplay current video
   useEffect(() => {
     const currentVideo = videoRefs.current[currentIndex]
     if (currentVideo) {
@@ -359,32 +302,7 @@ export default function FleexPage() {
     }
   }
 
-  const getMockFleex = (categories: string[]) => {
-    const mockVideos = []
-    const category = categories[0] || 'For You'
-    for (let i = 0; i < 5; i++) {
-      mockVideos.push({
-        id: `mock_${i}`,
-        user_id: currentUser?.id || 'mock',
-        video_url: '',
-        thumbnail_url: '',
-        caption: `Sample ${category} video ${i + 1}`,
-        music_name: 'Sample Sound',
-        view_count: 1000,
-        like_count: 100,
-        comment_count: 10,
-        share_count: 5,
-        duration: 15,
-        created_at: new Date().toISOString(),
-        display_name: 'Sample Creator',
-        username: 'creator',
-        avatar_url: null
-      })
-    }
-    return mockVideos
-  }
-
-  // Category Selection Modal (First Time User)
+  // Category Selection Modal (First time only)
   if (showCategoryModal) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-orange-50 to-purple-50 flex items-center justify-center p-4">
@@ -394,49 +312,31 @@ export default function FleexPage() {
               <Sparkles className="h-8 w-8 text-white" />
             </div>
             <h1 className="text-2xl font-black text-gray-900 mb-2">Welcome to Fleex! 🎬</h1>
-            <p className="text-gray-500 text-sm">Select topics you're interested in</p>
+            <p className="text-gray-500 text-sm">Choose your favorite category to get started</p>
           </div>
           
           <div className="flex flex-wrap gap-2 mb-6 max-h-64 overflow-y-auto">
-            {VIDEO_CATEGORIES.map((category) => {
-              const isSelected = tempCategories.includes(category)
-              return (
-                <button
-                  key={category}
-                  onClick={() => {
-                    if (isSelected) {
-                      setTempCategories(prev => prev.filter(c => c !== category))
-                    } else if (tempCategories.length < 6) {
-                      setTempCategories(prev => [...prev, category])
-                    }
-                  }}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                    isSelected
-                      ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-md'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {category}
-                </button>
-              )
-            })}
+            {VIDEO_CATEGORIES.map((category) => (
+              <button
+                key={category}
+                onClick={() => setTempCategory(category)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                  tempCategory === category
+                    ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {category}
+              </button>
+            ))}
           </div>
           
-          <div className="flex gap-3">
-            <button
-              onClick={() => setTempCategories(VIDEO_CATEGORIES.slice(0, 6))}
-              className="flex-1 px-4 py-2 border border-gray-200 rounded-full text-gray-600 text-sm"
-            >
-              Select Some
-            </button>
-            <button
-              onClick={saveInterests}
-              disabled={tempCategories.length === 0}
-              className="flex-1 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full font-medium text-sm disabled:opacity-50"
-            >
-              Continue ({tempCategories.length})
-            </button>
-          </div>
+          <button
+            onClick={saveUserInterest}
+            className="w-full px-4 py-3 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full font-medium"
+          >
+            Continue
+          </button>
         </div>
       </div>
     )
@@ -453,47 +353,38 @@ export default function FleexPage() {
     )
   }
 
-  if (fleex.length === 0 && !loading) {
-    return (
-      <div className="h-screen bg-black flex flex-col items-center justify-center p-4">
-        <div className="text-center">
-          <div className="w-20 h-20 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-4">
-            <Flame className="h-10 w-10 text-white/50" />
+  return (
+    <div className="h-screen bg-black overflow-hidden">
+      {/* Header */}
+      <div className="fixed top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/60 to-transparent pt-12 pb-4">
+        <div className="flex items-center justify-between px-4">
+          <div className="flex items-center gap-1">
+            <span className="text-white font-black text-xl">Face</span>
+            <span className="text-orange-500 font-black text-xl">Forge</span>
+            <span className="text-white font-black text-xl">Fleex</span>
           </div>
-          <h2 className="text-white font-bold text-xl mb-2">No Fleex yet</h2>
-          <p className="text-white/50 text-sm mb-6">
-            Check back later for new videos
-          </p>
+          
+          {/* Category Selector */}
           <button
-            onClick={() => fetchFleex(1, selectedCategories, true)}
-            className="px-6 py-3 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full font-medium"
+            onClick={() => {
+              setTempCategory(selectedCategory)
+              setShowCategoryModal(true)
+            }}
+            className="px-3 py-1.5 bg-white/20 backdrop-blur-md rounded-full text-white text-xs font-medium"
           >
-            Refresh
+            {selectedCategory}
           </button>
         </div>
       </div>
-    )
-  }
-
-  return (
-    <div className="h-screen bg-black overflow-hidden">
-      {/* Simple Header - No bottom nav interference */}
-      <div className="fixed top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/60 to-transparent pt-12 pb-4">
-        <div className="flex items-center justify-center gap-1">
-          <span className="text-white font-black text-xl">Face</span>
-          <span className="text-orange-500 font-black text-xl">Forge</span>
-          <span className="text-white font-black text-xl">Fleex</span>
-        </div>
-      </div>
       
-      {/* Create Fleex Button - Positioned above bottom nav */}
+      {/* Create Fleex Button - Above bottom nav */}
       <Link href="/create-fleex">
-        <button className="fixed bottom-20 right-4 z-20 w-14 h-14 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 shadow-lg flex items-center justify-center active:scale-95 transition">
+        <button className="fixed bottom-20 right-4 z-30 w-14 h-14 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 shadow-lg flex items-center justify-center active:scale-95 transition">
           <Plus className="h-6 w-6 text-white" />
         </button>
       </Link>
       
-      {/* Videos Container - Full height with proper padding */}
+      {/* Videos Container */}
       <div 
         ref={containerRef}
         className="h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth"
@@ -505,7 +396,15 @@ export default function FleexPage() {
             className="relative h-screen w-full snap-start snap-always bg-black"
           >
             {/* Video Player */}
-            {item.video_url ? (
+            {item.is_youtube ? (
+              <iframe
+                ref={el => { iframeRefs.current[index] = el }}
+                src={`https://www.youtube.com/embed/${item.id}?autoplay=${index === currentIndex ? 1 : 0}&mute=${isMuted ? 1 : 0}&controls=0&loop=1&playlist=${item.id}&modestbranding=1&rel=0&showinfo=0&autohide=1&playsinline=1`}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            ) : (
               <video
                 ref={el => { videoRefs.current[index] = el }}
                 src={item.video_url}
@@ -516,10 +415,6 @@ export default function FleexPage() {
                 poster={item.thumbnail_url}
                 onEnded={() => handleVideoEnded(index)}
               />
-            ) : (
-              <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
-                <p className="text-white/50">Video unavailable</p>
-              </div>
             )}
             
             {/* Right Side Actions */}
@@ -575,22 +470,12 @@ export default function FleexPage() {
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 p-0.5">
                   <div className="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
-                    {item.avatar_url ? (
-                      <Image
-                        src={item.avatar_url}
-                        alt={item.display_name || 'User'}
-                        width={36}
-                        height={36}
-                        className="rounded-full object-cover"
-                      />
-                    ) : (
-                      <User className="h-5 w-5 text-white" />
-                    )}
+                    <User className="h-5 w-5 text-white" />
                   </div>
                 </div>
                 <div>
                   <p className="text-white font-semibold text-sm">
-                    {item.display_name || 'User'}
+                    {item.display_name || 'Creator'}
                   </p>
                   <p className="text-white/50 text-xs">
                     {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
@@ -634,10 +519,14 @@ export default function FleexPage() {
         )}
       </div>
       
-      {/* Comments Modal */}
+      {/* Comments Modal - Positioned above bottom nav */}
       {showComments && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex items-end" onClick={() => setShowComments(false)}>
-          <div className="w-full bg-white rounded-t-2xl max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowComments(false)}>
+          <div className="absolute inset-0 bg-black/70" onClick={() => setShowComments(false)} />
+          <div 
+            className="relative w-full bg-white rounded-t-2xl max-h-[70vh] overflow-y-auto pb-20"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white">
               <h3 className="font-bold text-gray-900">Comments</h3>
               <button onClick={() => setShowComments(false)} className="p-1">
@@ -672,14 +561,14 @@ export default function FleexPage() {
               )}
             </div>
             
-            <div className="p-4 border-t border-gray-100">
+            <div className="p-4 border-t border-gray-100 bg-white sticky bottom-0">
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
                   placeholder="Add a comment..."
-                  className="flex-1 px-4 py-2 bg-gray-100 rounded-full text-sm focus:outline-none"
+                  className="flex-1 px-4 py-2 bg-gray-100 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
                 />
                 <button
                   onClick={addComment}
