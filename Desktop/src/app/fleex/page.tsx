@@ -369,14 +369,7 @@ export default function FleexPage() {
         </button>
       </div>
       
-      {/* Create Fleex Button - Above bottom nav */}
-      <Link href="/create-fleex">
-        <button className="fixed bottom-20 right-4 z-30 w-14 h-14 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 shadow-lg flex items-center justify-center active:scale-95 transition">
-          <Plus className="h-6 w-6 text-white" />
-        </button>
-      </Link>
-      
-      {/* Videos Container */}
+      {/* Videos Container - No floating button */}
       <div 
         ref={containerRef}
         className="h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth"
@@ -493,7 +486,7 @@ export default function FleexPage() {
             <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
             <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/30 to-transparent pointer-events-none" />
             
-            {/* Sound Icon - Moved down */}
+            {/* Sound Icon */}
             <button
               onClick={() => setIsMuted(!isMuted)}
               className="absolute bottom-28 right-3 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center z-10 active:scale-95 transition"
