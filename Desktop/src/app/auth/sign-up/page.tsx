@@ -69,6 +69,7 @@ export default function Page() {
     setIsLoading(true)
     setError(null)
 
+    // Password validation
     if (password !== repeatPassword) {
       setError('Passwords do not match')
       setIsLoading(false)
@@ -77,6 +78,19 @@ export default function Page() {
 
     if (password.length < 6) {
       setError('Password must be at least 6 characters')
+      setIsLoading(false)
+      return
+    }
+
+    if (password.length > 72) {
+      setError('Password must be less than 72 characters')
+      setIsLoading(false)
+      return
+    }
+
+    // Email validation
+    if (!email.includes('@') || !email.includes('.')) {
+      setError('Please enter a valid email address')
       setIsLoading(false)
       return
     }
@@ -326,6 +340,13 @@ export default function Page() {
         .ff-footer { font-size: 13.5px; color: #9ca3af; font-weight: 600; margin-top: 20px; text-align: center; }
         .ff-footer a { color: #5b21f5; text-decoration: none; font-weight: 800; transition: opacity 0.15s; }
         .ff-footer a:hover { opacity: 0.75; }
+        
+        .ff-password-hint {
+          font-size: 11px;
+          color: #9ca3af;
+          margin-top: 4px;
+          margin-left: 4px;
+        }
       `}</style>
 
       <div className="ff-root">
@@ -384,6 +405,7 @@ export default function Page() {
                   {showPassword ? <EyeOff /> : <EyeOpen />}
                 </button>
               </div>
+              <p className="ff-password-hint">• Must be at least 6 characters</p>
             </div>
 
             <div className="ff-field">
