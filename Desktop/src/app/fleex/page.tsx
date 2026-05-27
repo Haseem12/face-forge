@@ -9,14 +9,14 @@ import Link from 'next/link'
 import {
   X, Heart, Share2, Bookmark, Volume2, VolumeX,
   RefreshCw, User, Music, MessageCircle,
-  Plus, Flame, Sparkles, ChevronLeft, Play
+  Plus, Flame, Sparkles, ChevronLeft, Play, Pause
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
 const VIDEO_CATEGORIES = [
   'For You',
   'Technology', 
-  'Health & Wellness',
+  'Health',
   'Entertainment',
   'Gaming',
   'Sports',
@@ -302,28 +302,28 @@ export default function FleexPage() {
     }
   }
 
-  // Category Selection Modal (First time only)
+  // Category Selection Modal - Clean surface without card
   if (showCategoryModal) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-purple-50 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-6">
-          <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-gradient-to-r from-orange-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Sparkles className="h-8 w-8 text-white" />
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 flex items-center justify-center mx-auto mb-4">
+              <Sparkles className="h-10 w-10 text-white" />
             </div>
-            <h1 className="text-2xl font-black text-gray-900 mb-2">Welcome to Fleex! 🎬</h1>
-            <p className="text-gray-500 text-sm">Choose your favorite category to get started</p>
+            <h1 className="text-2xl font-black text-white mb-2">Choose Your Vibe</h1>
+            <p className="text-gray-400 text-sm">Pick a category to start watching</p>
           </div>
           
-          <div className="flex flex-wrap gap-2 mb-6 max-h-64 overflow-y-auto">
+          <div className="flex flex-wrap gap-2 justify-center mb-8">
             {VIDEO_CATEGORIES.map((category) => (
               <button
                 key={category}
                 onClick={() => setTempCategory(category)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                className={`px-5 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                   tempCategory === category
-                    ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-lg'
+                    : 'bg-white/10 text-white hover:bg-white/20'
                 }`}
               >
                 {category}
@@ -333,9 +333,9 @@ export default function FleexPage() {
           
           <button
             onClick={saveUserInterest}
-            className="w-full px-4 py-3 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full font-medium"
+            className="w-full py-3 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full font-medium active:scale-95 transition"
           >
-            Continue
+            Start Watching
           </button>
         </div>
       </div>
@@ -355,26 +355,18 @@ export default function FleexPage() {
 
   return (
     <div className="h-screen bg-black overflow-hidden">
-      {/* Header */}
-      <div className="fixed top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/60 to-transparent pt-12 pb-4">
-        <div className="flex items-center justify-between px-4">
-          <div className="flex items-center gap-1">
-            <span className="text-white font-black text-xl">Face</span>
-            <span className="text-orange-500 font-black text-xl">Forge</span>
-            <span className="text-white font-black text-xl">Fleex</span>
-          </div>
-          
-          {/* Category Selector */}
-          <button
-            onClick={() => {
-              setTempCategory(selectedCategory)
-              setShowCategoryModal(true)
-            }}
-            className="px-3 py-1.5 bg-white/20 backdrop-blur-md rounded-full text-white text-xs font-medium"
-          >
-            {selectedCategory}
-          </button>
-        </div>
+      {/* Simple Category Selector - Small pill at top */}
+      <div className="fixed top-12 left-0 right-0 z-20 flex justify-center">
+        <button
+          onClick={() => {
+            setTempCategory(selectedCategory)
+            setShowCategoryModal(true)
+          }}
+          className="px-4 py-1.5 bg-white/10 backdrop-blur-md rounded-full text-white text-xs font-medium active:scale-95 transition flex items-center gap-1"
+        >
+          <Sparkles className="h-3 w-3" />
+          {selectedCategory}
+        </button>
       </div>
       
       {/* Create Fleex Button - Above bottom nav */}
@@ -466,7 +458,7 @@ export default function FleexPage() {
             </div>
             
             {/* Left Side Info */}
-            <div className="absolute left-3 bottom-24 z-10 max-w-[70%]">
+            <div className="absolute left-3 bottom-28 z-10 max-w-[70%]">
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 p-0.5">
                   <div className="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
@@ -497,14 +489,14 @@ export default function FleexPage() {
               </div>
             </div>
             
-            {/* Gradients */}
-            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+            {/* Bottom Gradient */}
+            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
             <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/30 to-transparent pointer-events-none" />
             
-            {/* Sound Toggle */}
+            {/* Sound Icon - Moved down */}
             <button
               onClick={() => setIsMuted(!isMuted)}
-              className="absolute top-20 right-3 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center z-10 active:scale-95 transition"
+              className="absolute bottom-28 right-3 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center z-10 active:scale-95 transition"
             >
               {isMuted ? <VolumeX className="h-5 w-5 text-white" /> : <Volume2 className="h-5 w-5 text-white" />}
             </button>
