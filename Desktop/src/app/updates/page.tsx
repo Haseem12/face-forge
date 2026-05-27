@@ -8,11 +8,10 @@ import Image from 'next/image'
 import Link from 'next/link'
 import {
   X, Clock, Eye, Heart, Share2, Play, Bookmark, Volume2, VolumeX,
-  RefreshCw, Sparkles, Flame, TrendingUp
+  RefreshCw, Sparkles, Flame, TrendingUp, User, MoreHorizontal,
+  Music, Instagram, Facebook, Twitter, Send, MessageCircle
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
-import ThreeCurveFab from '@/components/dashboard/layout/three-curve-fab'
 
 // Video Categories - Simple horizontal buttons without icons
 const VIDEO_CATEGORIES = [
@@ -56,6 +55,7 @@ interface Video {
   thumbnail: string
   channelTitle: string
   channelId: string
+  channelAvatar?: string
   viewCount: string
   likeCount: string
   duration: string
@@ -77,18 +77,21 @@ export default function UpdatesPage() {
   const [showInterestModal, setShowInterestModal] = useState(false)
   const [hasSetInterests, setHasSetInterests] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
-  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0)
   const [savedVideos, setSavedVideos] = useState<Set<string>>(new Set())
   const [likedVideos, setLikedVideos] = useState<Set<string>>(new Set())
   const [showRefreshButton, setShowRefreshButton] = useState(false)
   const [newVideosCount, setNewVideosCount] = useState(0)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
+  const [isMuted, setIsMuted] = useState(true)
+  const [showComments, setShowComments] = useState(false)
   
+  const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const observerTarget = useRef<HTMLDivElement>(null)
-  const videoContainerRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const categoriesScrollRef = useRef<HTMLDivElement>(null)
-  const ITEMS_PER_PAGE = 10
+  const ITEMS_PER_PAGE = 8
 
   // Fetch current user
   useEffect(() => {
@@ -167,23 +170,25 @@ export default function UpdatesPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       
-      const videosList: Video[] = (data.videos || []).map((v: any) => ({
-        id: v.id || v.videoId || `video_${Math.random()}`,
+      const videosList: Video[] = (data.videos || []).map((v: any, idx: number) => ({
+        id: v.id || v.videoId || `video_${Date.now()}_${idx}`,
         videoId: v.videoId || v.id,
         title: v.title || 'Untitled',
         description: v.description || '',
-        thumbnail: v.thumbnail || v.thumbnail_url || `https://picsum.photos/seed/${Math.random()}/400/225`,
-        channelTitle: v.channelTitle || v.channel_title || 'Channel',
+        thumbnail: v.thumbnail || v.thumbnail_url || `https://picsum.photos/seed/${Date.now()}_${idx}/400/700`,
+        channelTitle: v.channelTitle || v.channel_title || 'Creator',
         channelId: v.channelId || '',
+        channelAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(v.channelTitle || 'Creator')}&background=random&color=fff&size=64`,
         viewCount: v.viewCount || Math.floor(Math.random() * 1000000).toString(),
         likeCount: v.likeCount || Math.floor(Math.random() * 50000).toString(),
-        duration: v.duration || `PT${Math.floor(Math.random() * 10) + 1}M`,
+        duration: v.duration || `PT${Math.floor(Math.random() * 60) + 15}S`,
         publishedAt: v.publishedAt || new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
         category: category
       }))
       
       if (isRefresh || pageNum === 1) {
         setVideos(videosList)
+        setCurrentVideoIndex(0)
         setPage(1)
         setHasMore(videosList.length >= ITEMS_PER_PAGE)
         setLastUpdated(new Date())
@@ -194,7 +199,6 @@ export default function UpdatesPage() {
       }
     } catch (error) {
       console.error('Error fetching videos:', error)
-      // Return mock data
       const mockVideos = getMockVideos(category, ITEMS_PER_PAGE)
       if (isRefresh || pageNum === 1) {
         setVideos(mockVideos)
@@ -212,10 +216,61 @@ export default function UpdatesPage() {
     fetchVideos(1, category, true)
   }
 
-  // Handle manual refresh
-  const handleRefresh = async () => {
-    if (refreshing) return
-    await fetchVideos(1, selectedCategory, true)
+  // Handle video index change on scroll
+  const handleScroll = useCallback(() => {
+    if (!containerRef.current) return
+    
+    const scrollTop = containerRef.current.scrollTop
+    const videoHeight = window.innerHeight
+    const newIndex = Math.round(scrollTop / videoHeight)
+    
+    if (newIndex !== currentVideoIndex && newIndex >= 0 && newIndex < videos.length) {
+      // Pause previous video
+      const prevVideo = videoRefs.current[currentVideoIndex]
+      if (prevVideo) {
+        prevVideo.pause()
+      }
+      
+      setCurrentVideoIndex(newIndex)
+      
+      // Play new video
+      const newVideo = videoRefs.current[newIndex]
+      if (newVideo) {
+        newVideo.play().catch(e => console.log('Playback error:', e))
+      }
+    }
+    
+    // Load more when reaching near bottom
+    if (scrollTop + window.innerHeight * 3 >= containerRef.current.scrollHeight && hasMore && !loading && !refreshing) {
+      setPage(prev => prev + 1)
+      fetchVideos(page + 1, selectedCategory, false)
+    }
+  }, [currentVideoIndex, videos.length, hasMore, loading, refreshing, page, selectedCategory])
+
+  // Attach scroll listener
+  useEffect(() => {
+    const container = containerRef.current
+    if (container) {
+      container.addEventListener('scroll', handleScroll)
+      return () => container.removeEventListener('scroll', handleScroll)
+    }
+  }, [handleScroll])
+
+  // Auto-play current video
+  useEffect(() => {
+    const currentVideo = videoRefs.current[currentVideoIndex]
+    if (currentVideo) {
+      currentVideo.play().catch(e => console.log('Auto-play error:', e))
+    }
+  }, [currentVideoIndex])
+
+  // Toggle mute
+  const toggleMute = () => {
+    setIsMuted(!isMuted)
+    const currentVideo = videoRefs.current[currentVideoIndex]
+    if (currentVideo) {
+      currentVideo.muted = !isMuted
+    }
   }
 
   // Format view count
@@ -224,20 +279,6 @@ export default function UpdatesPage() {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
     return num.toString()
-  }
-
-  // Format duration
-  const formatDuration = (duration: string) => {
-    const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
-    if (!match) return '0:00'
-    const hours = match[1] ? parseInt(match[1]) : 0
-    const minutes = match[2] ? parseInt(match[2]) : 0
-    const seconds = match[3] ? parseInt(match[3]) : 0
-    
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-    }
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
   // Toggle save video
@@ -276,39 +317,17 @@ export default function UpdatesPage() {
     }
   }
 
-  // Infinite scroll observer
-  useEffect(() => {
-    if (!hasSetInterests) return
-    
-    const observer = new IntersectionObserver(
-      async (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading && !refreshing) {
-          const nextPage = page + 1
-          setPage(nextPage)
-          await fetchVideos(nextPage, selectedCategory, false)
-        }
-      },
-      { threshold: 0.1, rootMargin: '100px' }
-    )
-    
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current)
-    }
-    
-    return () => observer.disconnect()
-  }, [hasMore, loading, refreshing, page, hasSetInterests, selectedCategory])
-
   // Mock videos generator
   const getMockVideos = (category: string, count: number): Video[] => {
     const titles = [
-      `Top 10 ${category} Trends You Need to Know`,
-      `Amazing ${category} Breakthroughs 2024`,
-      `Ultimate ${category} Guide for Beginners`,
-      `${category} Experts Share Their Secrets`,
-      `Best ${category} Moments Compilation`,
-      `How to Master ${category} in 10 Minutes`,
-      `The Future of ${category} - What's Next?`,
-      `Inspiring ${category} Success Stories`
+      `Amazing ${category} video you need to see! 🔥`,
+      `${category} experts share their secrets ✨`,
+      `Best ${category} moments compilation 🎯`,
+      `How to master ${category} in minutes ⚡`,
+      `The future of ${category} is here 🚀`,
+      `${category} tutorial for beginners 📚`,
+      `Mind-blowing ${category} discoveries 💡`,
+      `${category} challenge - can you do this? 🏆`
     ]
     
     const channels = [
@@ -326,12 +345,13 @@ export default function UpdatesPage() {
         videoId: `mock_${i}`,
         title: titles[i % titles.length],
         description: `Watch this amazing ${category} video`,
-        thumbnail: `https://picsum.photos/seed/${category}_${i}/400/225`,
+        thumbnail: `https://picsum.photos/seed/${category}_${i}/400/700`,
         channelTitle: channels[i % channels.length],
         channelId: `channel_${i}`,
+        channelAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(channels[i % channels.length])}&background=random&color=fff&size=64`,
         viewCount: `${Math.floor(Math.random() * 5000000)}`,
         likeCount: `${Math.floor(Math.random() * 200000)}`,
-        duration: `PT${Math.floor(Math.random() * 15) + 1}M${Math.floor(Math.random() * 59)}S`,
+        duration: `PT${Math.floor(Math.random() * 60) + 15}S`,
         publishedAt: new Date(Date.now() - Math.random() * 14 * 24 * 60 * 60 * 1000).toISOString(),
         category: category
       })
@@ -350,7 +370,7 @@ export default function UpdatesPage() {
             <div className="w-16 h-16 bg-gradient-to-r from-orange-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
               <Sparkles className="h-8 w-8 text-white" />
             </div>
-            <h1 className="text-2xl font-black text-gray-900 mb-2">Welcome to Video Feed! 🎬</h1>
+            <h1 className="text-2xl font-black text-gray-900 mb-2">Welcome to Reels! 🎬</h1>
             <p className="text-gray-500 text-sm">Select your interests to get personalized videos</p>
           </div>
           
@@ -402,47 +422,42 @@ export default function UpdatesPage() {
   // Loading state
   if (loading && videos.length === 0) {
     return (
-      <div className="bg-gray-50 min-h-screen">
-        <DashboardHeader />
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="h-12 bg-gray-200 rounded-full w-full mb-6 animate-pulse" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="bg-white rounded-xl overflow-hidden animate-pulse">
-                <div className="aspect-video bg-gray-200" />
-                <div className="p-4">
-                  <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-                  <div className="h-3 bg-gray-200 rounded w-1/2" />
-                </div>
-              </div>
-            ))}
-          </div>
+      <div className="h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-3 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-white/70">Loading reels...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="bg-gray-50 min-h-screen pb-24">
-      <DashboardHeader />
-      
-      <main className="max-w-7xl mx-auto px-4 py-4" ref={videoContainerRef}>
-        
-        {/* Category Tabs - Horizontal Scroll, Mobile Touch Friendly */}
-        <div className="mb-6">
+    <div className="h-screen bg-black overflow-hidden">
+      {/* Category Header - Top */}
+      <div className="fixed top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/60 to-transparent pt-5 pb-3">
+        <div className="px-4">
+          <div className="flex justify-center mb-3">
+            <div className="flex gap-1">
+              <span className="text-white font-black text-xl">Face</span>
+              <span className="text-orange-500 font-black text-xl">Forge</span>
+              <span className="text-white font-black text-xl">Reels</span>
+            </div>
+          </div>
+          
+          {/* Category Tabs - Horizontal Scroll */}
           <div 
             ref={categoriesScrollRef}
-            className="flex gap-2 overflow-x-auto scrollbar-hide pb-2 -mx-1 px-1"
+            className="flex gap-2 overflow-x-auto scrollbar-hide"
             style={{ WebkitOverflowScrolling: 'touch' }}
           >
             {VIDEO_CATEGORIES.map((category) => (
               <button
                 key={category}
                 onClick={() => handleCategoryChange(category)}
-                className={`px-5 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all active:scale-95 touch-manipulation ${
+                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all active:scale-95 ${
                   selectedCategory === category
-                    ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                    ? 'bg-white text-black'
+                    : 'bg-white/20 text-white backdrop-blur-sm'
                 }`}
               >
                 {category}
@@ -450,234 +465,219 @@ export default function UpdatesPage() {
             ))}
           </div>
         </div>
-        
-        {/* Refresh Button */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Flame className="h-5 w-5 text-orange-500" />
-            <h2 className="text-base font-black text-gray-900">{selectedCategory}</h2>
-            {lastUpdated && (
-              <span className="text-[10px] text-gray-400">
-                Updated {formatDistanceToNow(lastUpdated, { addSuffix: true })}
-              </span>
-            )}
-          </div>
-          
-          {showRefreshButton && (
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-xs font-bold shadow-lg animate-pulse active:scale-95 transition"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              {newVideosCount} new
-            </button>
-          )}
-        </div>
-        
-        {/* Video Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {videos.map((video) => (
-            <div
-              key={video.id}
-              className="bg-white rounded-xl overflow-hidden border border-gray-100 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer touch-manipulation"
-              onClick={() => setSelectedVideo(video)}
-            >
-              {/* Thumbnail */}
-              <div className="relative aspect-video bg-gray-100">
-                <Image
-                  src={video.thumbnail}
-                  alt={video.title}
-                  fill
-                  className="object-cover"
-                  unoptimized
+      </div>
+      
+      {/* Refresh Indicator */}
+      {showRefreshButton && (
+        <button
+          onClick={() => fetchVideos(1, selectedCategory, true)}
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-bold shadow-lg animate-bounce"
+        >
+          <RefreshCw className="h-4 w-4" />
+          {newVideosCount} new reels
+        </button>
+      )}
+      
+      {/* Videos Container - Full Screen Reels */}
+      <div 
+        ref={containerRef}
+        className="h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth"
+        style={{ scrollSnapType: 'y mandatory' }}
+      >
+        {videos.map((video, index) => (
+          <div 
+            key={video.id}
+            className="relative h-screen w-full snap-start snap-always bg-black"
+          >
+            {/* Video Background */}
+            <div className="absolute inset-0">
+              {video.videoId.startsWith('mock_') ? (
+                // Mock video - static image with gradient
+                <div className="relative w-full h-full">
+                  <Image
+                    src={video.thumbnail}
+                    alt={video.title}
+                    fill
+                    className="object-cover"
+                    unoptimized
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
+                </div>
+              ) : (
+                // Real YouTube embed (invisible, just audio/video)
+                <iframe
+                  src={`https://www.youtube.com/embed/${video.videoId}?autoplay=${index === currentVideoIndex ? 1 : 0}&mute=${isMuted ? 1 : 0}&controls=0&loop=1&playlist=${video.videoId}&modestbranding=1&rel=0&showinfo=0&autohide=1&playsinline=1`}
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  style={{ 
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover'
+                  }}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
                 />
-                {/* Duration badge */}
-                <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
-                  {formatDuration(video.duration)}
+              )}
+            </div>
+            
+            {/* Video Element for mock videos */}
+            {video.videoId.startsWith('mock_') && (
+              <video
+                ref={el => { videoRefs.current[index] = el }}
+                src={video.thumbnail}
+                className="absolute inset-0 w-full h-full object-cover"
+                loop
+                muted={isMuted}
+                playsInline
+                poster={video.thumbnail}
+              />
+            )}
+            
+            {/* Right Side Action Buttons */}
+            <div className="absolute right-3 bottom-28 flex flex-col items-center gap-5 z-10">
+              {/* Like Button */}
+              <button
+                onClick={() => toggleLike(video.id)}
+                className="flex flex-col items-center gap-1 active:scale-95 transition"
+              >
+                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Heart className={`h-7 w-7 ${likedVideos.has(video.id) ? 'fill-red-500 text-red-500' : 'text-white'}`} />
                 </div>
-                {/* Play overlay */}
-                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                  <Play className="h-12 w-12 text-white fill-white drop-shadow-lg" />
+                <span className="text-white text-xs font-medium">{formatViews(video.likeCount)}</span>
+              </button>
+              
+              {/* Comment Button */}
+              <button
+                onClick={() => setShowComments(!showComments)}
+                className="flex flex-col items-center gap-1 active:scale-95 transition"
+              >
+                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <MessageCircle className="h-7 w-7 text-white" />
                 </div>
+                <span className="text-white text-xs font-medium">Comment</span>
+              </button>
+              
+              {/* Save Button */}
+              <button
+                onClick={() => toggleSave(video.id)}
+                className="flex flex-col items-center gap-1 active:scale-95 transition"
+              >
+                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Bookmark className={`h-7 w-7 ${savedVideos.has(video.id) ? 'fill-blue-500 text-blue-500' : 'text-white'}`} />
+                </div>
+                <span className="text-white text-xs font-medium">Save</span>
+              </button>
+              
+              {/* Share Button */}
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`https://youtube.com/watch?v=${video.videoId}`)
+                }}
+                className="flex flex-col items-center gap-1 active:scale-95 transition"
+              >
+                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Share2 className="h-7 w-7 text-white" />
+                </div>
+                <span className="text-white text-xs font-medium">Share</span>
+              </button>
+            </div>
+            
+            {/* Left Side - Info & Music */}
+            <div className="absolute left-3 bottom-20 z-10 max-w-[70%]">
+              {/* Creator Info */}
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 p-0.5">
+                  <div className="w-full h-full rounded-full bg-black flex items-center justify-center">
+                    {video.channelAvatar ? (
+                      <Image
+                        src={video.channelAvatar}
+                        alt={video.channelTitle}
+                        width={38}
+                        height={38}
+                        className="rounded-full"
+                      />
+                    ) : (
+                      <User className="h-5 w-5 text-white" />
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-white font-semibold text-sm">{video.channelTitle}</p>
+                  <p className="text-white/60 text-xs">{formatViews(video.viewCount)} views</p>
+                </div>
+                <button className="px-4 py-1.5 bg-white rounded-full text-black text-xs font-bold">
+                  Follow
+                </button>
               </div>
               
-              {/* Video Info */}
-              <div className="p-3">
-                <h3 className="font-semibold text-gray-900 text-sm line-clamp-2 mb-1">
-                  {video.title}
-                </h3>
-                
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span className="truncate">{video.channelTitle}</span>
-                  <span>•</span>
-                  <span>{formatViews(video.viewCount)} views</span>
-                </div>
-                
-                {/* Action Buttons */}
-                <div className="flex items-center gap-4 mt-3 pt-2 border-t border-gray-50">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleLike(video.id) }}
-                    className={`flex items-center gap-1 text-xs transition active:scale-95 touch-manipulation ${
-                      likedVideos.has(video.id) ? 'text-red-500' : 'text-gray-500 hover:text-red-500'
-                    }`}
-                  >
-                    <Heart className={`h-4 w-4 ${likedVideos.has(video.id) ? 'fill-red-500' : ''}`} />
-                    <span>Like</span>
-                  </button>
-                  
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleSave(video.id) }}
-                    className={`flex items-center gap-1 text-xs transition active:scale-95 touch-manipulation ${
-                      savedVideos.has(video.id) ? 'text-blue-500' : 'text-gray-500 hover:text-blue-500'
-                    }`}
-                  >
-                    <Bookmark className={`h-4 w-4 ${savedVideos.has(video.id) ? 'fill-blue-500' : ''}`} />
-                    <span>Save</span>
-                  </button>
-                </div>
+              {/* Video Title */}
+              <p className="text-white text-sm font-medium mb-2 line-clamp-2">
+                {video.title}
+              </p>
+              
+              {/* Music Info */}
+              <div className="flex items-center gap-2">
+                <Music className="h-3.5 w-3.5 text-white/80" />
+                <p className="text-white/80 text-xs">Original Sound - {video.channelTitle}</p>
               </div>
             </div>
-          ))}
-        </div>
+            
+            {/* Bottom Gradient */}
+            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+            
+            {/* Top Gradient */}
+            <div className="absolute top-0 left-0 right-0 h-40 bg-gradient-to-b from-black/50 to-transparent pointer-events-none" />
+            
+            {/* Sound Toggle Button */}
+            <button
+              onClick={toggleMute}
+              className="absolute top-24 right-3 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center z-10 active:scale-95 transition"
+            >
+              {isMuted ? <VolumeX className="h-5 w-5 text-white" /> : <Volume2 className="h-5 w-5 text-white" />}
+            </button>
+          </div>
+        ))}
         
-        {/* Loading more indicator */}
-        {hasMore && !loading && !refreshing && videos.length > 0 && (
-          <div ref={observerTarget} className="flex justify-center py-8">
-            <div className="flex items-center gap-2 text-gray-400">
-              <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm">Loading more...</span>
-            </div>
+        {/* Loading indicator */}
+        {hasMore && !loading && (
+          <div className="h-20 flex items-center justify-center bg-black">
+            <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
           </div>
         )}
-        
-        {/* Empty state */}
-        {!loading && videos.length === 0 && (
-          <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
-            <div className="text-6xl mb-4">📭</div>
-            <h3 className="font-bold text-gray-900 mb-1">No videos found</h3>
-            <p className="text-sm text-gray-500">Try a different category</p>
-          </div>
-        )}
-      </main>
-      
-      {/* FAB */}
-      <ThreeCurveFab />
-      
-      {/* Story Viewer */}
-      {viewingStoryUserId && (
-        <StoryViewer 
-          userId={viewingStoryUserId} 
-          onClose={() => setViewingStoryUserId(null)} 
-        />
-      )}
-      
-      {/* Video Player Modal */}
-      {selectedVideo && (
-        <VideoPlayerModal
-          video={selectedVideo}
-          onClose={() => setSelectedVideo(null)}
-          onLike={() => toggleLike(selectedVideo.id)}
-          onSave={() => toggleSave(selectedVideo.id)}
-          isLiked={likedVideos.has(selectedVideo.id)}
-          isSaved={savedVideos.has(selectedVideo.id)}
-        />
-      )}
-    </div>
-  )
-}
-
-// Video Player Modal Component
-function VideoPlayerModal({ 
-  video, 
-  onClose, 
-  onLike, 
-  onSave,
-  isLiked,
-  isSaved
-}: { 
-  video: Video
-  onClose: () => void
-  onLike: () => void
-  onSave: () => void
-  isLiked: boolean
-  isSaved: boolean
-}) {
-  const [isMuted, setIsMuted] = useState(true)
-  
-  const formatViews = (views: string) => {
-    const num = parseInt(views)
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
-    return num.toString()
-  }
-  
-  return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-2" onClick={onClose}>
-      <div className="relative w-full max-w-4xl bg-black rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        {/* Video iframe - using embedded player */}
-        <div className="aspect-video">
-          {video.videoId.startsWith('mock_') ? (
-            <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
-              <Play className="h-16 w-16 text-white/50" />
-            </div>
-          ) : (
-            <iframe
-              src={`https://www.youtube.com/embed/${video.videoId}?autoplay=1&mute=${isMuted ? 1 : 0}&rel=0`}
-              title={video.title}
-              className="w-full h-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
-          )}
-        </div>
-        
-        {/* Video Info Overlay */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black via-black/80 to-transparent">
-          <h3 className="text-white font-bold text-base mb-2 line-clamp-2">{video.title}</h3>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-white/80 text-sm">{video.channelTitle}</span>
-              <span className="text-white/60 text-xs">{formatViews(video.viewCount)} views</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <button 
-                onClick={onLike} 
-                className={`flex flex-col items-center gap-0.5 transition active:scale-95 ${
-                  isLiked ? 'text-red-500' : 'text-white/80 hover:text-red-500'
-                }`}
-              >
-                <Heart className={`h-5 w-5 ${isLiked ? 'fill-red-500' : ''}`} />
-                <span className="text-[10px]">Like</span>
-              </button>
-              <button 
-                onClick={onSave} 
-                className={`flex flex-col items-center gap-0.5 transition active:scale-95 ${
-                  isSaved ? 'text-blue-500' : 'text-white/80 hover:text-blue-500'
-                }`}
-              >
-                <Bookmark className={`h-5 w-5 ${isSaved ? 'fill-blue-500' : ''}`} />
-                <span className="text-[10px]">Save</span>
-              </button>
-              <button 
-                onClick={() => setIsMuted(!isMuted)} 
-                className="flex flex-col items-center gap-0.5 text-white/80 hover:text-white"
-              >
-                {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-                <span className="text-[10px]">Sound</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        
-        {/* Close button */}
-        <button 
-          onClick={onClose} 
-          className="absolute top-3 right-3 text-white/80 bg-black/50 rounded-full p-2 hover:text-white active:scale-95 transition"
-        >
-          <X className="h-5 w-5" />
-        </button>
       </div>
+      
+      {/* Comments Modal */}
+      {showComments && videos[currentVideoIndex] && (
+        <div className="fixed inset-0 z-50 bg-black/95 flex items-end" onClick={() => setShowComments(false)}>
+          <div className="w-full bg-white rounded-t-2xl max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white">
+              <h3 className="font-bold text-gray-900">Comments</h3>
+              <button onClick={() => setShowComments(false)} className="p-1">
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4 text-center text-gray-500">
+              <MessageCircle className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+              <p>No comments yet</p>
+              <p className="text-sm">Be the first to comment</p>
+            </div>
+            <div className="p-4 border-t border-gray-100">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Add a comment..."
+                  className="flex-1 px-4 py-2 bg-gray-100 rounded-full text-sm focus:outline-none"
+                />
+                <button className="px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-medium">
+                  Post
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
