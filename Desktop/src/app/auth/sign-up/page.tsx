@@ -3,211 +3,260 @@
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
-export default function Page() {
+export default function SignUpPage() {
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [repeatPassword, setRepeatPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [showRepeat, setShowRepeat] = useState(false)
+  const [code, setCode] = useState(['', '', '', '', '', ''])
+  const [showCodeInput, setShowCodeInput] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [countdown, setCountdown] = useState(0)
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   const router = useRouter()
+  const supabase = createClient()
 
-  const handleSignUp = async (e: React.FormEvent) => {
+  // Auto-focus next input on code entry
+  useEffect(() => {
+    if (showCodeInput) {
+      inputRefs.current[0]?.focus()
+    }
+  }, [showCodeInput])
+
+  // Countdown timer for resend
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [countdown])
+
+  const handleCodeChange = (index: number, value: string) => {
+    if (value.length > 1) return
+    
+    const newCode = [...code]
+    newCode[index] = value
+    setCode(newCode)
+    
+    // Auto-focus next input
+    if (value && index < 5) {
+      inputRefs.current[index + 1]?.focus()
+    }
+    
+    // Auto-submit when all digits entered
+    if (index === 5 && value) {
+      const fullCode = [...newCode.slice(0, 5), value].join('')
+      if (fullCode.length === 6) {
+        handleVerifyCode(fullCode)
+      }
+    }
+  }
+
+  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace' && !code[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus()
+    }
+  }
+
+  // Step 1: Send OTP code (no signup yet)
+  const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault()
-    const supabase = createClient()
     setIsLoading(true)
     setError(null)
 
-    if (password !== repeatPassword) {
-      setError('Passwords do not match')
+    if (!email) {
+      setError('Please enter your email')
       setIsLoading(false)
       return
     }
 
     try {
-      const { error } = await supabase.auth.signUp({
+      // Supabase sends 6-digit OTP to email automatically[citation:4]
+      const { error } = await supabase.auth.signInWithOtp({
         email,
-        password,
         options: {
-          emailRedirectTo:
-            process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
-            `${window.location.origin}/auth/callback`,
-        },
+          shouldCreateUser: true, // Creates user if doesn't exist
+        }
       })
+
       if (error) throw error
-      // New user goes to signup success page
-      router.push('/auth/sign-up-success')
+
+      setShowCodeInput(true)
+      setCountdown(60)
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred')
+      setError(error instanceof Error ? error.message : 'Failed to send code')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const EyeOpen = () => (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-      <circle cx="12" cy="12" r="3"/>
-    </svg>
-  )
+  // Step 2: Verify OTP code and complete signup
+  const handleVerifyCode = async (verificationCode: string) => {
+    setIsLoading(true)
+    setError(null)
 
-  const EyeOff = () => (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-      <line x1="1" y1="1" x2="23" y2="23"/>
-    </svg>
-  )
+    try {
+      // Verify the OTP code[citation:4][citation:8]
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token: verificationCode,
+        type: 'email'
+      })
 
-  return (
-    <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        .ff-root {
-          min-height: 100svh; background: #ffffff; display: flex;
-          align-items: flex-start; justify-content: center;
-          font-family: 'Nunito', sans-serif; padding: 48px 24px 40px;
+      if (error) throw error
+
+      if (data.user) {
+        // Generate username from email
+        const username = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase() 
+          + Math.floor(Math.random() * 1000)
+        const displayName = email.split('@')[0]
+
+        // Create profile
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            id: data.user.id,
+            email: email,
+            display_name: displayName,
+            username: username,
+          })
+
+        if (profileError) {
+          console.error('Profile creation error:', profileError)
         }
-        .ff-container { width: 100%; max-width: 400px; display: flex; flex-direction: column; align-items: center; }
-        .ff-logo-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 28px; }
-        .ff-icon { width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; }
-        .ff-icon img { width: 80px; height: 80px; object-fit: contain; }
-        .ff-brand { font-size: 30px; font-weight: 900; letter-spacing: -0.5px; line-height: 1; }
-        .ff-brand-face { color: #111111; }
-        .ff-brand-forge { color: #5b21f5; }
-        .ff-tagline { font-size: 13.5px; color: #9ca3af; font-weight: 500; }
-        .ff-welcome { text-align: center; margin-bottom: 28px; }
-        .ff-welcome-title { font-size: 22px; font-weight: 800; color: #111111; letter-spacing: -0.3px; }
-        .ff-welcome-sub { font-size: 13.5px; color: #9ca3af; font-weight: 500; margin-top: 4px; }
-        .ff-form { width: 100%; display: flex; flex-direction: column; gap: 16px; }
-        .ff-field { display: flex; flex-direction: column; gap: 6px; width: 100%; }
-        .ff-label { font-size: 13px; font-weight: 700; color: #374151; }
-        .ff-input-wrap { position: relative; width: 100%; }
-        .ff-input-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #c4c9d4; display: flex; align-items: center; }
-        .ff-input {
-          width: 100%; height: 52px; border: 1.5px solid #e5e7eb; border-radius: 14px;
-          background: #f9fafb; padding: 0 44px 0 42px; font-size: 14px;
-          font-family: 'Nunito', sans-serif; font-weight: 500; color: #111111; outline: none;
-          transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
-        }
-        .ff-input::placeholder { color: #b5bbc6; }
-        .ff-input:focus { border-color: #5b21f5; background: #ffffff; box-shadow: 0 0 0 3px rgba(91,33,245,0.1); }
-        .ff-eye-btn { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #b5bbc6; display: flex; align-items: center; padding: 4px; transition: color 0.15s; }
-        .ff-eye-btn:hover { color: #5b21f5; }
-        .ff-error { font-size: 12.5px; color: #dc2626; background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 10px 14px; font-weight: 600; }
-        .ff-btn-submit {
-          width: 100%; height: 52px; background: #5b21f5; color: #ffffff; font-size: 15px;
-          font-weight: 800; font-family: 'Nunito', sans-serif; border: none; border-radius: 14px;
-          cursor: pointer; letter-spacing: 0.3px; margin-top: 4px;
-          transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
-          box-shadow: 0 4px 20px rgba(91,33,245,0.35);
-        }
-        .ff-btn-submit:hover:not(:disabled) { background: #4c1be0; box-shadow: 0 6px 24px rgba(91,33,245,0.45); transform: translateY(-1px); }
-        .ff-btn-submit:active:not(:disabled) { transform: translateY(0); }
-        .ff-btn-submit:disabled { opacity: 0.65; cursor: not-allowed; }
-        .ff-footer { font-size: 13.5px; color: #9ca3af; font-weight: 600; margin-top: 20px; text-align: center; }
-        .ff-footer a { color: #5b21f5; text-decoration: none; font-weight: 800; transition: opacity 0.15s; }
-        .ff-footer a:hover { opacity: 0.75; }
-      `}</style>
 
-      <div className="ff-root">
-        <div className="ff-container">
+        router.push('/dashboard')
+      }
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : 'Invalid code')
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
-          <div className="ff-logo-wrap">
-            <div className="ff-icon">
-              <img src="/logo.png" alt="FaceForge logo" />
+  const handleResendCode = async () => {
+    if (countdown > 0) return
+    
+    setCountdown(60)
+    try {
+      await supabase.auth.signInWithOtp({ email })
+    } catch (error) {
+      console.error('Resend failed:', error)
+    }
+  }
+
+  const handleCodeChangeWrapper = (index: number, value: string) => {
+    handleCodeChange(index, value)
+  }
+
+  if (showCodeInput) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center p-6">
+        <div className="w-full max-w-md text-center">
+          <div className="mb-8">
+            <div className="w-20 h-20 bg-gradient-to-r from-orange-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5">
+                <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+              </svg>
             </div>
-            <div className="ff-brand">
-              <span className="ff-brand-face">Face</span><span className="ff-brand-forge">Forge</span>
-            </div>
-            <p className="ff-tagline">build your identity, shape your world.</p>
+            <h2 className="text-2xl font-black text-gray-900">Check your email</h2>
+            <p className="text-gray-500 mt-2">
+              Enter the 6-digit code sent to<br />
+              <span className="font-semibold text-gray-900">{email}</span>
+            </p>
           </div>
 
-          <div className="ff-welcome">
-            <h1 className="ff-welcome-title">create account</h1>
-            <p className="ff-welcome-sub">join FaceForge and start building</p>
+          <div className="flex gap-3 justify-center mb-6">
+            {code.map((digit, index) => (
+              <input
+                key={index}
+                ref={el => { inputRefs.current[index] = el }}
+                type="text"
+                maxLength={1}
+                value={digit}
+                onChange={(e) => handleCodeChangeWrapper(index, e.target.value)}
+                onKeyDown={(e) => handleKeyDown(index, e)}
+                className="w-14 h-16 text-center text-2xl font-bold border-2 border-gray-200 rounded-xl bg-gray-50 focus:border-orange-500 focus:outline-none"
+              />
+            ))}
           </div>
 
-          <form className="ff-form" onSubmit={handleSignUp}>
-
-            <div className="ff-field">
-              <label className="ff-label" htmlFor="email">email</label>
-              <div className="ff-input-wrap">
-                <span className="ff-input-icon">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="4" width="20" height="16" rx="2"/>
-                    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
-                  </svg>
-                </span>
-                <input
-                  id="email" className="ff-input" type="email"
-                  placeholder="name@example.com" required
-                  value={email} onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
+          {error && (
+            <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg mb-4">
+              {error}
             </div>
+          )}
 
-            <div className="ff-field">
-              <label className="ff-label" htmlFor="password">password</label>
-              <div className="ff-input-wrap">
-                <span className="ff-input-icon">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                  </svg>
-                </span>
-                <input
-                  id="password" className="ff-input"
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="create a password" required
-                  value={password} onChange={(e) => setPassword(e.target.value)}
-                />
-                <button type="button" className="ff-eye-btn" onClick={() => setShowPassword(!showPassword)}>
-                  {showPassword ? <EyeOff /> : <EyeOpen />}
-                </button>
-              </div>
-            </div>
+          <button
+            onClick={() => handleVerifyCode(code.join(''))}
+            disabled={isLoading || code.join('').length !== 6}
+            className="w-full py-3 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full font-bold disabled:opacity-50"
+          >
+            {isLoading ? 'Verifying...' : 'Verify & Create Account'}
+          </button>
 
-            <div className="ff-field">
-              <label className="ff-label" htmlFor="repeat-password">confirm password</label>
-              <div className="ff-input-wrap">
-                <span className="ff-input-icon">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                  </svg>
-                </span>
-                <input
-                  id="repeat-password" className="ff-input"
-                  type={showRepeat ? 'text' : 'password'}
-                  placeholder="repeat your password" required
-                  value={repeatPassword} onChange={(e) => setRepeatPassword(e.target.value)}
-                />
-                <button type="button" className="ff-eye-btn" onClick={() => setShowRepeat(!showRepeat)}>
-                  {showRepeat ? <EyeOff /> : <EyeOpen />}
-                </button>
-              </div>
-            </div>
-
-            {error && <div className="ff-error">{error}</div>}
-
-            <button type="submit" className="ff-btn-submit" disabled={isLoading}>
-              {isLoading ? 'creating account...' : 'create account'}
+          <div className="mt-4">
+            <button
+              onClick={handleResendCode}
+              disabled={countdown > 0}
+              className="text-orange-500 text-sm disabled:text-gray-400"
+            >
+              {countdown > 0 ? `Resend in ${countdown}s` : 'Resend code'}
             </button>
-
-          </form>
-
-          <p className="ff-footer">
-            already have an account?{' '}
-            <Link href="/auth/login">sign in</Link>
-          </p>
-
+          </div>
         </div>
       </div>
-    </>
+    )
+  }
+
+  // Sign Up Form
+  return (
+    <div className="min-h-screen bg-white flex items-center justify-center p-6">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="flex items-center justify-center gap-1 mb-4">
+            <span className="text-3xl font-black text-gray-900">Face</span>
+            <span className="text-3xl font-black text-orange-500">Forge</span>
+          </div>
+          <h1 className="text-2xl font-black text-gray-900">Create account</h1>
+          <p className="text-gray-500">Enter your email to get started</p>
+        </div>
+
+        <form onSubmit={handleSendCode} className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+              required
+            />
+          </div>
+
+          {error && (
+            <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full py-3 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full font-bold disabled:opacity-50"
+          >
+            {isLoading ? 'Sending code...' : 'Continue with Email'}
+          </button>
+        </form>
+
+        <p className="text-center text-gray-500 text-sm mt-6">
+          Already have an account?{' '}
+          <Link href="/auth/login" className="text-orange-500 font-bold">
+            Sign in
+          </Link>
+        </p>
+      </div>
+    </div>
   )
 }
