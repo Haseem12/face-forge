@@ -1,7 +1,7 @@
 // app/dashboard/privacy/page.tsx
 'use client'
 
-import { Shield, Eye, Database, Lock, Globe, Clock, CheckCircle } from 'lucide-react'
+import { Shield, Eye, Database, Lock, Globe, Clock, CheckCircle, Video } from 'lucide-react'
 import Link from 'next/link'
 import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
 
@@ -49,15 +49,37 @@ export default function PrivacyPage() {
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong className="text-gray-800">Content You Create:</strong> Forges, posts, comments, and stories</span>
+                  <span><strong className="text-gray-800">Content You Create:</strong> Videos, captions, comments, and interactions</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong className="text-gray-800">Interaction Data:</strong> Likes, follows, shares, and comments</span>
+                  <span><strong className="text-gray-800">Video Data:</strong> Your uploaded reels, thumbnails, and video metadata</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong className="text-gray-800">Usage Information:</strong> How you use our platform and features</span>
+                  <span><strong className="text-gray-800">Interaction Data:</strong> Likes, follows, shares, and comments on videos</span>
+                </li>
+              </ul>
+            </section>
+            
+            {/* Video Content Section */}
+            <section>
+              <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <Video className="h-5 w-5 text-orange-500" />
+                Video Content
+              </h2>
+              <ul className="space-y-2 text-gray-600">
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>All videos you upload are stored securely in our cloud storage</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>You can delete your videos at any time</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>Videos are visible to your followers based on your privacy settings</span>
                 </li>
               </ul>
             </section>
@@ -71,19 +93,19 @@ export default function PrivacyPage() {
               <ul className="space-y-2 text-gray-600">
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Provide and improve our services</span>
+                  <span>Provide and improve our video streaming service</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Personalize your feed and recommendations</span>
+                  <span>Personalize your reels feed</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Communicate important updates</span>
+                  <span>Analyze video performance and engagement</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Ensure platform safety and security</span>
+                  <span>Ensure platform safety and content moderation</span>
                 </li>
               </ul>
             </section>
@@ -96,8 +118,8 @@ export default function PrivacyPage() {
               </h2>
               <p className="text-gray-600 leading-relaxed">
                 We use industry-standard security measures to protect your data, including encryption, 
-                secure servers, and regular security audits. However, no method of transmission over 
-                the internet is 100% secure.
+                secure servers, and regular security audits. Your video content is stored in secured 
+                cloud storage with access controls.
               </p>
             </section>
             
@@ -114,15 +136,15 @@ export default function PrivacyPage() {
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Delete your account and associated data</span>
+                  <span>Delete your account and associated videos</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Opt out of marketing communications</span>
+                  <span>Control who sees your videos (public/private)</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Control who sees your content</span>
+                  <span>Opt out of analytics tracking</span>
                 </li>
               </ul>
             </section>
