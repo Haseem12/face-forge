@@ -5,15 +5,14 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
-import Link from 'next/link'
 import {
-  X, Clock, Eye, Heart, Share2, Play, Bookmark, Volume2, VolumeX,
-  RefreshCw, Sparkles, Flame, TrendingUp, User, MoreHorizontal,
-  Music, Instagram, Facebook, Twitter, Send, MessageCircle
+  X, Heart, Share2, Bookmark, Volume2, VolumeX,
+  RefreshCw, Sparkles, User, Music, MessageCircle,
+  ChevronLeft
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
-// Video Categories - Simple horizontal buttons without icons
+// Video Categories
 const VIDEO_CATEGORIES = [
   'For You',
   'Technology', 
@@ -30,21 +29,20 @@ const VIDEO_CATEGORIES = [
   'News'
 ]
 
-// Category to search query mapping
 const CATEGORY_QUERIES: Record<string, string> = {
   'For You': 'viral trending popular',
-  'Technology': 'technology tech gadgets AI programming',
-  'Health': 'health wellness mental health fitness',
-  'Entertainment': 'entertainment movies tv shows viral',
-  'Gaming': 'gaming video games gameplay esports',
-  'Sports': 'sports highlights football basketball',
-  'Business': 'business entrepreneurship finance',
-  'Music': 'music new songs concerts',
-  'Lifestyle': 'lifestyle vlog travel food',
-  'Science': 'science physics space discovery',
-  'Fitness': 'fitness workout gym exercise',
-  'Creators': 'content creator tips youtube',
-  'News': 'breaking news world news'
+  'Technology': 'technology tech gadgets AI',
+  'Health': 'health wellness fitness',
+  'Entertainment': 'entertainment movies viral',
+  'Gaming': 'gaming gameplay esports',
+  'Sports': 'sports highlights football',
+  'Business': 'business entrepreneurship',
+  'Music': 'music songs viral',
+  'Lifestyle': 'lifestyle vlog travel',
+  'Science': 'science space discovery',
+  'Fitness': 'fitness workout gym',
+  'Creators': 'content creator tips',
+  'News': 'breaking news'
 }
 
 interface Video {
@@ -74,7 +72,7 @@ export default function UpdatesPage() {
   const [hasMore, setHasMore] = useState(true)
   const [page, setPage] = useState(1)
   const [selectedCategory, setSelectedCategory] = useState('For You')
-  const [showInterestModal, setShowInterestModal] = useState(false)
+  const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [hasSetInterests, setHasSetInterests] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0)
@@ -83,14 +81,12 @@ export default function UpdatesPage() {
   const [showRefreshButton, setShowRefreshButton] = useState(false)
   const [newVideosCount, setNewVideosCount] = useState(0)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
   const [isMuted, setIsMuted] = useState(true)
   const [showComments, setShowComments] = useState(false)
+  const [showCategorySelector, setShowCategorySelector] = useState(false)
   
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
-  const observerTarget = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const categoriesScrollRef = useRef<HTMLDivElement>(null)
   const ITEMS_PER_PAGE = 8
 
   // Fetch current user
@@ -107,7 +103,6 @@ export default function UpdatesPage() {
     getUser()
   }, [supabase, router])
 
-  // Check if user has set interests
   const checkUserInterests = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -121,16 +116,15 @@ export default function UpdatesPage() {
         setHasSetInterests(true)
         fetchVideos(1, data.categories[0], true)
       } else {
-        setShowInterestModal(true)
+        setShowCategoryModal(true)
         setLoading(false)
       }
     } catch (error) {
-      setShowInterestModal(true)
+      setShowCategoryModal(true)
       setLoading(false)
     }
   }
 
-  // Save user interests
   const saveInterests = async (categories: string[]) => {
     if (!currentUser || categories.length === 0) return
     
@@ -147,14 +141,13 @@ export default function UpdatesPage() {
       
       setSelectedCategory(categories[0])
       setHasSetInterests(true)
-      setShowInterestModal(false)
+      setShowCategoryModal(false)
       await fetchVideos(1, categories[0], true)
     } catch (error) {
       console.error('Error saving interests:', error)
     }
   }
 
-  // Fetch videos
   const fetchVideos = async (pageNum: number, category: string, isRefresh = false) => {
     if (isRefresh) {
       setRefreshing(true)
@@ -175,8 +168,8 @@ export default function UpdatesPage() {
         videoId: v.videoId || v.id,
         title: v.title || 'Untitled',
         description: v.description || '',
-        thumbnail: v.thumbnail || v.thumbnail_url || `https://picsum.photos/seed/${Date.now()}_${idx}/400/700`,
-        channelTitle: v.channelTitle || v.channel_title || 'Creator',
+        thumbnail: v.thumbnail || `https://picsum.photos/seed/${Date.now()}_${idx}/400/700`,
+        channelTitle: v.channelTitle || 'Creator',
         channelId: v.channelId || '',
         channelAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(v.channelTitle || 'Creator')}&background=random&color=fff&size=64`,
         viewCount: v.viewCount || Math.floor(Math.random() * 1000000).toString(),
@@ -210,13 +203,6 @@ export default function UpdatesPage() {
     }
   }
 
-  // Handle category change
-  const handleCategoryChange = (category: string) => {
-    setSelectedCategory(category)
-    fetchVideos(1, category, true)
-  }
-
-  // Handle video index change on scroll
   const handleScroll = useCallback(() => {
     if (!containerRef.current) return
     
@@ -225,7 +211,6 @@ export default function UpdatesPage() {
     const newIndex = Math.round(scrollTop / videoHeight)
     
     if (newIndex !== currentVideoIndex && newIndex >= 0 && newIndex < videos.length) {
-      // Pause previous video
       const prevVideo = videoRefs.current[currentVideoIndex]
       if (prevVideo) {
         prevVideo.pause()
@@ -233,21 +218,18 @@ export default function UpdatesPage() {
       
       setCurrentVideoIndex(newIndex)
       
-      // Play new video
       const newVideo = videoRefs.current[newIndex]
       if (newVideo) {
         newVideo.play().catch(e => console.log('Playback error:', e))
       }
     }
     
-    // Load more when reaching near bottom
-    if (scrollTop + window.innerHeight * 3 >= containerRef.current.scrollHeight && hasMore && !loading && !refreshing) {
+    if (scrollTop + window.innerHeight * 2 >= containerRef.current.scrollHeight && hasMore && !loading && !refreshing) {
       setPage(prev => prev + 1)
       fetchVideos(page + 1, selectedCategory, false)
     }
   }, [currentVideoIndex, videos.length, hasMore, loading, refreshing, page, selectedCategory])
 
-  // Attach scroll listener
   useEffect(() => {
     const container = containerRef.current
     if (container) {
@@ -256,7 +238,6 @@ export default function UpdatesPage() {
     }
   }, [handleScroll])
 
-  // Auto-play current video
   useEffect(() => {
     const currentVideo = videoRefs.current[currentVideoIndex]
     if (currentVideo) {
@@ -264,7 +245,6 @@ export default function UpdatesPage() {
     }
   }, [currentVideoIndex])
 
-  // Toggle mute
   const toggleMute = () => {
     setIsMuted(!isMuted)
     const currentVideo = videoRefs.current[currentVideoIndex]
@@ -273,15 +253,13 @@ export default function UpdatesPage() {
     }
   }
 
-  // Format view count
-  const formatViews = (views: string) => {
-    const num = parseInt(views)
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
-    return num.toString()
+  const formatNumber = (num: string) => {
+    const n = parseInt(num)
+    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+    return n.toString()
   }
 
-  // Toggle save video
   const toggleSave = async (videoId: string) => {
     if (!currentUser) return
     
@@ -299,7 +277,6 @@ export default function UpdatesPage() {
     }
   }
 
-  // Toggle like
   const toggleLike = async (videoId: string) => {
     if (!currentUser) return
     
@@ -317,26 +294,26 @@ export default function UpdatesPage() {
     }
   }
 
-  // Mock videos generator
+  const handleVideoEnded = (index: number) => {
+    const video = videoRefs.current[index]
+    if (video) {
+      video.currentTime = 0
+      video.play().catch(e => console.log('Replay error:', e))
+    }
+  }
+
   const getMockVideos = (category: string, count: number): Video[] => {
     const titles = [
-      `Amazing ${category} video you need to see! 🔥`,
-      `${category} experts share their secrets ✨`,
-      `Best ${category} moments compilation 🎯`,
-      `How to master ${category} in minutes ⚡`,
-      `The future of ${category} is here 🚀`,
+      `Amazing ${category} video! 🔥`,
+      `${category} experts share secrets ✨`,
+      `Best ${category} moments 🎯`,
+      `How to master ${category} ⚡`,
+      `The future of ${category} 🚀`,
       `${category} tutorial for beginners 📚`,
-      `Mind-blowing ${category} discoveries 💡`,
-      `${category} challenge - can you do this? 🏆`
+      `Mind-blowing ${category} discoveries 💡`
     ]
     
-    const channels = [
-      `${category} Insider`,
-      `${category} Daily`,
-      `The ${category} Show`,
-      `${category} Masters`,
-      `Learn ${category} Now`
-    ]
+    const channels = [`${category} Insider`, `${category} Daily`, `The ${category} Show`]
     
     const videos = []
     for (let i = 0; i < count; i++) {
@@ -359,8 +336,8 @@ export default function UpdatesPage() {
     return videos
   }
 
-  // Interest Selection Modal
-  if (showInterestModal) {
+  // Category Selection Modal (First Time)
+  if (showCategoryModal) {
     const [tempCategories, setTempCategories] = useState<string[]>(['Technology', 'Entertainment', 'Music'])
     
     return (
@@ -419,7 +396,49 @@ export default function UpdatesPage() {
     )
   }
 
-  // Loading state
+  // Category Selector Button (Top Right)
+  const CategorySelector = () => (
+    <button
+      onClick={() => setShowCategorySelector(!showCategorySelector)}
+      className="absolute top-12 right-3 z-20 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center active:scale-95 transition"
+    >
+      <User className="h-5 w-5 text-white" />
+    </button>
+  )
+
+  // Category List Modal
+  const CategoryListModal = () => (
+    <div className="fixed inset-0 z-30 bg-black/95 flex items-end" onClick={() => setShowCategorySelector(false)}>
+      <div className="w-full bg-gradient-to-t from-black to-gray-900 rounded-t-2xl max-h-[60vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/10">
+          <h3 className="text-white font-bold text-lg">Select Category</h3>
+          <button onClick={() => setShowCategorySelector(false)} className="p-1">
+            <X className="h-5 w-5 text-white/70" />
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {VIDEO_CATEGORIES.map((category) => (
+            <button
+              key={category}
+              onClick={() => {
+                setSelectedCategory(category)
+                setShowCategorySelector(false)
+                fetchVideos(1, category, true)
+              }}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all active:scale-95 ${
+                selectedCategory === category
+                  ? 'bg-gradient-to-r from-orange-500 to-purple-600 text-white'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              {category}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+
   if (loading && videos.length === 0) {
     return (
       <div className="h-screen bg-black flex items-center justify-center">
@@ -433,55 +452,27 @@ export default function UpdatesPage() {
 
   return (
     <div className="h-screen bg-black overflow-hidden">
-      {/* Category Header - Top */}
-      <div className="fixed top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/60 to-transparent pt-5 pb-3">
-        <div className="px-4">
-          <div className="flex justify-center mb-3">
-            <div className="flex gap-1">
-              <span className="text-white font-black text-xl">Face</span>
-              <span className="text-orange-500 font-black text-xl">Forge</span>
-              <span className="text-white font-black text-xl">Reels</span>
-            </div>
-          </div>
-          
-          {/* Category Tabs - Horizontal Scroll */}
-          <div 
-            ref={categoriesScrollRef}
-            className="flex gap-2 overflow-x-auto scrollbar-hide"
-            style={{ WebkitOverflowScrolling: 'touch' }}
-          >
-            {VIDEO_CATEGORIES.map((category) => (
-              <button
-                key={category}
-                onClick={() => handleCategoryChange(category)}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all active:scale-95 ${
-                  selectedCategory === category
-                    ? 'bg-white text-black'
-                    : 'bg-white/20 text-white backdrop-blur-sm'
-                }`}
-              >
-                {category}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-      
       {/* Refresh Indicator */}
       {showRefreshButton && (
         <button
           onClick={() => fetchVideos(1, selectedCategory, true)}
-          className="fixed top-20 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-bold shadow-lg animate-bounce"
+          className="fixed top-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-bold shadow-lg animate-bounce"
         >
           <RefreshCw className="h-4 w-4" />
           {newVideosCount} new reels
         </button>
       )}
       
-      {/* Videos Container - Full Screen Reels */}
+      {/* Category Selector Button */}
+      <CategorySelector />
+      
+      {/* Category List Modal */}
+      {showCategorySelector && <CategoryListModal />}
+      
+      {/* Videos Container */}
       <div 
         ref={containerRef}
-        className="h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth"
+        className="h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth pt-14"
         style={{ scrollSnapType: 'y mandatory' }}
       >
         {videos.map((video, index) => (
@@ -492,19 +483,17 @@ export default function UpdatesPage() {
             {/* Video Background */}
             <div className="absolute inset-0">
               {video.videoId.startsWith('mock_') ? (
-                // Mock video - static image with gradient
-                <div className="relative w-full h-full">
-                  <Image
-                    src={video.thumbnail}
-                    alt={video.title}
-                    fill
-                    className="object-cover"
-                    unoptimized
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
-                </div>
+                <video
+                  ref={el => { videoRefs.current[index] = el }}
+                  src={video.thumbnail}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  loop={false}
+                  muted={isMuted}
+                  playsInline
+                  poster={video.thumbnail}
+                  onEnded={() => handleVideoEnded(index)}
+                />
               ) : (
-                // Real YouTube embed (invisible, just audio/video)
                 <iframe
                   src={`https://www.youtube.com/embed/${video.videoId}?autoplay=${index === currentVideoIndex ? 1 : 0}&mute=${isMuted ? 1 : 0}&controls=0&loop=1&playlist=${video.videoId}&modestbranding=1&rel=0&showinfo=0&autohide=1&playsinline=1`}
                   className="absolute inset-0 w-full h-full pointer-events-none"
@@ -522,128 +511,109 @@ export default function UpdatesPage() {
               )}
             </div>
             
-            {/* Video Element for mock videos */}
-            {video.videoId.startsWith('mock_') && (
-              <video
-                ref={el => { videoRefs.current[index] = el }}
-                src={video.thumbnail}
-                className="absolute inset-0 w-full h-full object-cover"
-                loop
-                muted={isMuted}
-                playsInline
-                poster={video.thumbnail}
-              />
-            )}
-            
-            {/* Right Side Action Buttons */}
-            <div className="absolute right-3 bottom-28 flex flex-col items-center gap-5 z-10">
-              {/* Like Button */}
+            {/* Right Side Action Buttons - Smaller */}
+            <div className="absolute right-3 bottom-28 flex flex-col items-center gap-3 z-10">
               <button
                 onClick={() => toggleLike(video.id)}
-                className="flex flex-col items-center gap-1 active:scale-95 transition"
+                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
               >
-                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
-                  <Heart className={`h-7 w-7 ${likedVideos.has(video.id) ? 'fill-red-500 text-red-500' : 'text-white'}`} />
+                <div className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Heart className={`h-5 w-5 ${likedVideos.has(video.id) ? 'fill-red-500 text-red-500' : 'text-white'}`} />
                 </div>
-                <span className="text-white text-xs font-medium">{formatViews(video.likeCount)}</span>
+                <span className="text-white text-[10px] font-medium">{formatNumber(video.likeCount)}</span>
               </button>
               
-              {/* Comment Button */}
               <button
-                onClick={() => setShowComments(!showComments)}
-                className="flex flex-col items-center gap-1 active:scale-95 transition"
+                onClick={() => setShowComments(true)}
+                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
               >
-                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
-                  <MessageCircle className="h-7 w-7 text-white" />
+                <div className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <MessageCircle className="h-5 w-5 text-white" />
                 </div>
-                <span className="text-white text-xs font-medium">Comment</span>
+                <span className="text-white text-[10px] font-medium">Comment</span>
               </button>
               
-              {/* Save Button */}
               <button
                 onClick={() => toggleSave(video.id)}
-                className="flex flex-col items-center gap-1 active:scale-95 transition"
+                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
               >
-                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
-                  <Bookmark className={`h-7 w-7 ${savedVideos.has(video.id) ? 'fill-blue-500 text-blue-500' : 'text-white'}`} />
+                <div className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Bookmark className={`h-5 w-5 ${savedVideos.has(video.id) ? 'fill-blue-500 text-blue-500' : 'text-white'}`} />
                 </div>
-                <span className="text-white text-xs font-medium">Save</span>
+                <span className="text-white text-[10px] font-medium">Save</span>
               </button>
               
-              {/* Share Button */}
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(`https://youtube.com/watch?v=${video.videoId}`)
                 }}
-                className="flex flex-col items-center gap-1 active:scale-95 transition"
+                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
               >
-                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
-                  <Share2 className="h-7 w-7 text-white" />
+                <div className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Share2 className="h-5 w-5 text-white" />
                 </div>
-                <span className="text-white text-xs font-medium">Share</span>
+                <span className="text-white text-[10px] font-medium">Share</span>
               </button>
             </div>
             
-            {/* Left Side - Info & Music */}
-            <div className="absolute left-3 bottom-20 z-10 max-w-[70%]">
+            {/* Left Side - Info */}
+            <div className="absolute left-3 bottom-24 z-10 max-w-[70%]">
               {/* Creator Info */}
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 p-0.5">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 p-0.5">
                   <div className="w-full h-full rounded-full bg-black flex items-center justify-center">
                     {video.channelAvatar ? (
                       <Image
                         src={video.channelAvatar}
                         alt={video.channelTitle}
-                        width={38}
-                        height={38}
+                        width={28}
+                        height={28}
                         className="rounded-full"
                       />
                     ) : (
-                      <User className="h-5 w-5 text-white" />
+                      <User className="h-3.5 w-3.5 text-white" />
                     )}
                   </div>
                 </div>
                 <div>
-                  <p className="text-white font-semibold text-sm">{video.channelTitle}</p>
-                  <p className="text-white/60 text-xs">{formatViews(video.viewCount)} views</p>
+                  <p className="text-white font-semibold text-xs">{video.channelTitle}</p>
+                  <p className="text-white/50 text-[10px]">{formatNumber(video.viewCount)} views</p>
                 </div>
-                <button className="px-4 py-1.5 bg-white rounded-full text-black text-xs font-bold">
+                <button className="px-3 py-1 bg-white rounded-full text-black text-[10px] font-bold">
                   Follow
                 </button>
               </div>
               
               {/* Video Title */}
-              <p className="text-white text-sm font-medium mb-2 line-clamp-2">
+              <p className="text-white text-xs font-medium mb-1 line-clamp-2">
                 {video.title}
               </p>
               
               {/* Music Info */}
-              <div className="flex items-center gap-2">
-                <Music className="h-3.5 w-3.5 text-white/80" />
-                <p className="text-white/80 text-xs">Original Sound - {video.channelTitle}</p>
+              <div className="flex items-center gap-1">
+                <Music className="h-3 w-3 text-white/60" />
+                <p className="text-white/60 text-[10px]">Original Sound - {video.channelTitle}</p>
               </div>
             </div>
             
-            {/* Bottom Gradient */}
-            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+            {/* Gradients */}
+            <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+            <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/30 to-transparent pointer-events-none" />
             
-            {/* Top Gradient */}
-            <div className="absolute top-0 left-0 right-0 h-40 bg-gradient-to-b from-black/50 to-transparent pointer-events-none" />
-            
-            {/* Sound Toggle Button */}
+            {/* Sound Toggle */}
             <button
               onClick={toggleMute}
-              className="absolute top-24 right-3 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center z-10 active:scale-95 transition"
+              className="absolute top-20 right-3 w-8 h-8 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center z-10 active:scale-95 transition"
             >
-              {isMuted ? <VolumeX className="h-5 w-5 text-white" /> : <Volume2 className="h-5 w-5 text-white" />}
+              {isMuted ? <VolumeX className="h-4 w-4 text-white" /> : <Volume2 className="h-4 w-4 text-white" />}
             </button>
           </div>
         ))}
         
         {/* Loading indicator */}
         {hasMore && !loading && (
-          <div className="h-20 flex items-center justify-center bg-black">
-            <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+          <div className="h-16 flex items-center justify-center bg-black">
+            <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
           </div>
         )}
       </div>
@@ -659,9 +629,9 @@ export default function UpdatesPage() {
               </button>
             </div>
             <div className="p-4 text-center text-gray-500">
-              <MessageCircle className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-              <p>No comments yet</p>
-              <p className="text-sm">Be the first to comment</p>
+              <MessageCircle className="h-10 w-10 mx-auto mb-3 text-gray-300" />
+              <p className="text-sm">No comments yet</p>
+              <p className="text-xs">Be the first to comment</p>
             </div>
             <div className="p-4 border-t border-gray-100">
               <div className="flex gap-2">
