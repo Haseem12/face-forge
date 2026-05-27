@@ -16,7 +16,6 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [countdown, setCountdown] = useState(0)
-  const [tempUserId, setTempUserId] = useState<string | null>(null)
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   const router = useRouter()
   const supabase = createClient()
@@ -24,7 +23,7 @@ export default function Page() {
   // Auto-focus first input when code screen appears
   useEffect(() => {
     if (showCodeInput) {
-      inputRefs.current[0]?.focus()
+      setTimeout(() => inputRefs.current[0]?.focus(), 100)
     }
   }, [showCodeInput])
 
@@ -82,12 +81,6 @@ export default function Page() {
       return
     }
 
-    if (password.length > 72) {
-      setError('Password must be less than 72 characters')
-      setIsLoading(false)
-      return
-    }
-
     // Email validation
     if (!email.includes('@') || !email.includes('.')) {
       setError('Please enter a valid email address')
@@ -108,23 +101,19 @@ export default function Page() {
       if (error) throw error
 
       if (data.user) {
-        setTempUserId(data.user.id)
-        
-        // Send OTP code for verification
-        const { error: otpError } = await supabase.auth.signInWithOtp({
-          email,
-          options: {
-            shouldCreateUser: false,
-          }
-        })
-
-        if (otpError) throw otpError
-
+        // Immediately show code input UI
         setShowCodeInput(true)
         setCountdown(60)
       }
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred')
+      const errorMessage = error instanceof Error ? error.message : 'An error occurred'
+      
+      // Check for rate limit error
+      if (errorMessage.includes('rate_limit') || errorMessage.includes('59 seconds')) {
+        setError('Please wait 60 seconds before trying again')
+      } else {
+        setError(errorMessage)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -179,10 +168,19 @@ export default function Page() {
     if (countdown > 0) return
     
     setCountdown(60)
+    setCode(['', '', '', '', '', ''])
+    setError(null)
+    
     try {
-      await supabase.auth.signInWithOtp({ email })
-    } catch (error) {
-      console.error('Resend failed:', error)
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: false,
+        }
+      })
+      if (error) throw error
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : 'Failed to resend code')
     }
   }
 
@@ -229,7 +227,7 @@ export default function Page() {
           }
           .ff-btn-submit:hover:not(:disabled) { opacity: 0.9; }
           .ff-btn-submit:disabled { opacity: 0.65; cursor: not-allowed; }
-          .ff-resend-btn { background: none; border: none; color: #f97316; font-weight: 600; cursor: pointer; }
+          .ff-resend-btn { background: none; border: none; color: #f97316; font-weight: 600; cursor: pointer; font-size: 14px; }
           .ff-resend-btn:disabled { opacity: 0.5; cursor: not-allowed; }
           .ff-error { font-size: 12.5px; color: #dc2626; background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 10px 14px; }
         `}</style>
@@ -242,7 +240,7 @@ export default function Page() {
                   <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
                 </svg>
               </div>
-              <h2 className="text-2xl font-black text-gray-900 mb-2">Verify your email</h2>
+              <h2 className="text-2xl font-black text-gray-900 mb-2">Check your email</h2>
               <p className="text-gray-500 text-sm">
                 Enter the 6-digit code sent to<br />
                 <span className="font-semibold text-gray-900">{email}</span>
@@ -278,9 +276,9 @@ export default function Page() {
               <button
                 onClick={handleResendCode}
                 disabled={countdown > 0}
-                className="ff-resend-btn text-sm"
+                className="ff-resend-btn"
               >
-                {countdown > 0 ? `resend in ${countdown}s` : 'resend code'}
+                {countdown > 0 ? `resend code in ${countdown}s` : 'resend code'}
               </button>
             </div>
           </div>
