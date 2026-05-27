@@ -1,12 +1,12 @@
-// app/create-reel/page.tsx
+// app/create-fleex/page.tsx
 'use client'
 
 import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { X, Music, Camera, Upload, Trash2, Check } from 'lucide-react'
+import { X, Music, Camera, Upload, Trash2, Check, Sparkles } from 'lucide-react'
 
-export default function CreateReelPage() {
+export default function CreateFleexPage() {
   const [video, setVideo] = useState<File | null>(null)
   const [videoPreview, setVideoPreview] = useState<string | null>(null)
   const [caption, setCaption] = useState('')
@@ -36,62 +36,12 @@ export default function CreateReelPage() {
     const preview = URL.createObjectURL(file)
     setVideoPreview(preview)
 
-    // Get video duration
     const videoElement = document.createElement('video')
     videoElement.preload = 'metadata'
     videoElement.onloadedmetadata = () => {
       setDuration(videoElement.duration)
     }
     videoElement.src = preview
-  }
-
-  const uploadVideo = async () => {
-    if (!video) return
-
-    setUploading(true)
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
-
-      // Upload video to storage
-      const fileExt = video.name.split('.').pop()
-      const fileName = `${user.id}/${Date.now()}.${fileExt}`
-      
-      const { error: uploadError } = await supabase.storage
-        .from('user_videos')
-        .upload(fileName, video)
-
-      if (uploadError) throw uploadError
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('user_videos')
-        .getPublicUrl(fileName)
-
-      // Generate thumbnail (first frame)
-      const thumbnailUrl = await generateThumbnail(videoPreview!)
-
-      // Save to database
-      const { error: dbError } = await supabase
-        .from('user_videos')
-        .insert({
-          user_id: user.id,
-          video_url: publicUrl,
-          thumbnail_url: thumbnailUrl,
-          caption: caption || null,
-          music_name: musicName,
-          duration: duration
-        })
-
-      if (dbError) throw dbError
-
-      router.push('/updates')
-    } catch (error) {
-      console.error('Upload error:', error)
-      alert('Failed to upload video')
-    } finally {
-      setUploading(false)
-    }
   }
 
   const generateThumbnail = (videoUrl: string): Promise<string> => {
@@ -110,6 +60,51 @@ export default function CreateReelPage() {
     })
   }
 
+  const uploadVideo = async () => {
+    if (!video) return
+
+    setUploading(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+
+      const fileExt = video.name.split('.').pop()
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`
+      
+      const { error: uploadError } = await supabase.storage
+        .from('user_videos')
+        .upload(fileName, video)
+
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('user_videos')
+        .getPublicUrl(fileName)
+
+      const thumbnailUrl = await generateThumbnail(videoPreview!)
+
+      const { error: dbError } = await supabase
+        .from('user_fleex')
+        .insert({
+          user_id: user.id,
+          video_url: publicUrl,
+          thumbnail_url: thumbnailUrl,
+          caption: caption || null,
+          music_name: musicName,
+          duration: duration
+        })
+
+      if (dbError) throw dbError
+
+      router.push('/fleex')
+    } catch (error) {
+      console.error('Upload error:', error)
+      alert('Failed to upload fleex')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-black">
       {/* Header */}
@@ -117,7 +112,10 @@ export default function CreateReelPage() {
         <button onClick={() => router.back()} className="text-white">
           <X className="h-6 w-6" />
         </button>
-        <h1 className="text-white font-bold text-lg">Create Reel</h1>
+        <div className="flex items-center gap-1">
+          <span className="text-white font-bold text-lg">Create</span>
+          <span className="text-orange-500 font-bold text-lg">Fleex</span>
+        </div>
         <button
           onClick={uploadVideo}
           disabled={!video || uploading}
