@@ -1,111 +1,106 @@
 // app/dashboard/saved/page.tsx
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { Bookmark, Play, Eye, Trash2 } from 'lucide-react'
-import Image from 'next/image'
+import { useState } from 'react'
+import { Bookmark, Heart, Clock, Trash2, Play, Eye, MoreVertical, X } from 'lucide-react'
 import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
-import Link from 'next/link'
+import Image from 'next/image'
 
 export default function SavedPage() {
-  const [savedVideos, setSavedVideos] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const [activeTab, setActiveTab] = useState<'all' | 'posts' | 'videos'>('all')
+  
+  const savedItems = [
+    { id: 1, type: 'post', title: 'Amazing AI Art Tutorial', author: 'CreativeMind', likes: 1234, savedAt: '2 days ago', thumbnail: '/placeholder.jpg' },
+    { id: 2, type: 'video', title: 'How to Build a Forge', author: 'TechGuru', likes: 892, savedAt: '3 days ago', thumbnail: '/placeholder.jpg' },
+    { id: 3, type: 'post', title: 'Design Tips for Beginners', author: 'DesignMaster', likes: 567, savedAt: '1 week ago', thumbnail: '/placeholder.jpg' },
+    { id: 4, type: 'video', title: 'Fitness Routine 2025', author: 'FitLife', likes: 2341, savedAt: '1 week ago', thumbnail: '/placeholder.jpg' },
+  ]
 
-  useEffect(() => {
-    fetchSavedVideos()
-  }, [])
-
-  const fetchSavedVideos = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const { data } = await supabase
-      .from('saved_videos')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-
-    setSavedVideos(data || [])
-    setLoading(false)
-  }
-
-  const removeSaved = async (videoId: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    await supabase
-      .from('saved_videos')
-      .delete()
-      .eq('video_id', videoId)
-      .eq('user_id', user.id)
-
-    setSavedVideos(prev => prev.filter(v => v.video_id !== videoId))
-  }
+  const filteredItems = savedItems.filter(item => {
+    if (activeTab === 'all') return true
+    if (activeTab === 'posts') return item.type === 'post'
+    if (activeTab === 'videos') return item.type === 'video'
+    return true
+  })
 
   return (
-    <div className="bg-gray-50 min-h-screen">
+    <div className="min-h-screen bg-gray-50">
       <DashboardHeader />
       
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-3 mb-6">
-          <Bookmark className="h-6 w-6 text-orange-500" />
-          <h1 className="text-2xl font-black text-gray-900">Saved Videos</h1>
+      <main className="max-w-4xl mx-auto px-4 py-8">
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <Bookmark className="h-6 w-6 text-orange-500" />
+            <h1 className="text-2xl font-black text-gray-900">Saved</h1>
+          </div>
+          <p className="text-gray-500 text-sm">Content you've bookmarked for later</p>
         </div>
 
-        {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1,2,3,4,5,6].map(i => (
-              <div key={i} className="bg-white rounded-xl animate-pulse">
-                <div className="aspect-video bg-gray-200 rounded-t-xl" />
-                <div className="p-4">
-                  <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-                  <div className="h-3 bg-gray-200 rounded w-1/2" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : savedVideos.length === 0 ? (
-          <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6 border-b border-gray-200">
+          {[
+            { id: 'all', label: 'All', count: savedItems.length },
+            { id: 'posts', label: 'Posts', count: savedItems.filter(i => i.type === 'post').length },
+            { id: 'videos', label: 'Videos', count: savedItems.filter(i => i.type === 'video').length },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-4 py-2 text-sm font-medium transition border-b-2 ${
+                activeTab === tab.id
+                  ? 'border-orange-500 text-orange-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.label} ({tab.count})
+            </button>
+          ))}
+        </div>
+
+        {/* Saved Items Grid */}
+        {filteredItems.length === 0 ? (
+          <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
             <Bookmark className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-            <h3 className="font-bold text-gray-900 mb-1">No saved videos</h3>
-            <p className="text-sm text-gray-500">Save videos you like to watch later</p>
-            <Link href="/dashboard/updates">
-              <button className="mt-4 px-4 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-medium">
-                Browse Videos
-              </button>
-            </Link>
+            <h3 className="font-bold text-gray-900 mb-1">No saved items yet</h3>
+            <p className="text-sm text-gray-500">Save posts and videos to see them here</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {savedVideos.map((video) => (
-              <div key={video.id} className="bg-white rounded-xl overflow-hidden border border-gray-100 hover:shadow-md transition">
-                <div className="relative aspect-video bg-gray-100">
-                  <Image
-                    src={video.video_data?.thumbnail || '/placeholder-video.jpg'}
-                    alt={video.video_data?.title || 'Video'}
-                    fill
-                    className="object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition flex items-center justify-center">
-                    <Play className="h-12 w-12 text-white fill-white" />
+          <div className="space-y-4">
+            {filteredItems.map((item) => (
+              <div key={item.id} className="bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition group">
+                <div className="flex gap-4">
+                  {/* Thumbnail */}
+                  <div className="w-24 h-24 bg-gradient-to-br from-gray-200 to-gray-300 rounded-lg flex items-center justify-center flex-shrink-0">
+                    {item.type === 'video' ? (
+                      <Play className="h-6 w-6 text-gray-500" />
+                    ) : (
+                      <Eye className="h-6 w-6 text-gray-500" />
+                    )}
                   </div>
-                </div>
-                <div className="p-4">
-                  <h3 className="font-semibold text-gray-900 line-clamp-2 mb-2">
-                    {video.video_data?.title || 'Untitled Video'}
-                  </h3>
-                  <p className="text-xs text-gray-500 mb-3">
-                    Saved {new Date(video.created_at).toLocaleDateString()}
-                  </p>
-                  <button
-                    onClick={() => removeSaved(video.video_id)}
-                    className="text-red-500 text-sm flex items-center gap-1 hover:text-red-600"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Remove
-                  </button>
+                  
+                  {/* Content */}
+                  <div className="flex-1">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                            {item.type === 'video' ? 'Video' : 'Post'}
+                          </span>
+                          <span className="text-xs text-gray-400">{item.savedAt}</span>
+                        </div>
+                        <h3 className="font-semibold text-gray-900 mb-1">{item.title}</h3>
+                        <p className="text-sm text-gray-500">by {item.author}</p>
+                        <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
+                          <span className="flex items-center gap-1">
+                            <Heart className="h-3 w-3" /> {item.likes} likes
+                          </span>
+                        </div>
+                      </div>
+                      <button className="opacity-0 group-hover:opacity-100 transition p-1 hover:bg-gray-100 rounded-full">
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
