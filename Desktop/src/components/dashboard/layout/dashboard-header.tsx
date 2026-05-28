@@ -38,7 +38,7 @@ export default function DashboardHeader({
   const profileRef = useRef<HTMLDivElement>(null)
   const drawerRef = useRef<HTMLDivElement>(null)
 
-  // Scroll effect – richer shadow + border
+  // Scroll effect
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 4)
     window.addEventListener('scroll', handler, { passive: true })
@@ -94,7 +94,7 @@ export default function DashboardHeader({
     window.location.href = '/auth/login'
   }
 
-  // Drawer menu items with FaceForge colors
+  // Drawer menu items
   const drawerMenuItems = [
     { icon: User, label: 'Profile', href: `/profile/${profile?.username || 'me'}`, color: 'text-orange-500' },
     { icon: CreditCard, label: 'Subscription', href: '/dashboard/subscription', color: 'text-pink-500', badge: 'Pro' },
@@ -118,7 +118,7 @@ export default function DashboardHeader({
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between h-14 lg:h-16 gap-4">
             
-            {/* Left - Hamburger Menu Button (replaces logo) */}
+            {/* Left - Hamburger Menu Button (visible on all devices) */}
             <button
               onClick={() => setShowDrawer(true)}
               className="flex-shrink-0 flex flex-col gap-1.5 p-2 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-all duration-200"
@@ -129,8 +129,14 @@ export default function DashboardHeader({
               <div className="w-5 h-0.5 bg-gradient-to-r from-orange-500 to-pink-500 rounded-full transition-all" />
             </button>
 
-            {/* Search Bar – Rich X-style */}
-            <div className="hidden md:flex flex-1 max-w-md">
+            {/* Logo - Mobile */}
+            <div className="flex lg:hidden items-center">
+              <span className="text-lg font-black text-gray-900">Fleex</span>
+              <span className="text-orange-500 text-lg">.</span>
+            </div>
+
+            {/* Search Bar – Desktop only */}
+            <div className="hidden lg:block flex-1 max-w-md">
               <div className={`relative w-full transition-all duration-200 ${
                 searchFocused ? 'scale-[1.02]' : ''
               }`}>
@@ -152,15 +158,8 @@ export default function DashboardHeader({
               </div>
             </div>
 
-            {/* Right Actions */}
-            <div className="flex items-center gap-1 sm:gap-2">
-              {/* Mobile search */}
-              <Link href="/search" className="md:hidden">
-                <button className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-600 transition active:scale-95">
-                  <Search className="h-5 w-5" />
-                </button>
-              </Link>
-
+            {/* Right Actions - Desktop only */}
+            <div className="hidden lg:flex items-center gap-2">
               {/* Notifications */}
               <div ref={bellRef} className="relative">
                 <button
@@ -184,15 +183,10 @@ export default function DashboardHeader({
               </div>
 
               {/* Create Post Button */}
-              <Link href="/dashboard/forges/create">
-                <button className="hidden sm:flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-bold bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:shadow-lg hover:shadow-orange-200/50 hover:scale-105 active:scale-95 transition-all duration-200">
+              <Link href="/create-fleex">
+                <button className="flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-bold bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:shadow-lg hover:shadow-orange-200/50 hover:scale-105 active:scale-95 transition-all duration-200">
                   <Plus className="h-3.5 w-3.5" />
-                  <span>Post</span>
-                </button>
-              </Link>
-              <Link href="/dashboard/forges/create" className="sm:hidden">
-                <button className="w-9 h-9 flex items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-purple-600 text-white hover:shadow-lg active:scale-95 transition">
-                  <Plus className="h-4 w-4" />
+                  <span>Create</span>
                 </button>
               </Link>
 
@@ -240,9 +234,12 @@ export default function DashboardHeader({
                 )}
               </div>
             </div>
+
+            {/* Mobile Right - Empty spacer to balance the hamburger */}
+            <div className="flex lg:hidden w-9" />
           </div>
 
-          {/* Tabs – X‑style underline animation */}
+          {/* Tabs – Visible on all devices (mobile + desktop) */}
           <div className="flex items-center gap-1 -mb-px">
             {(['forYou', 'following'] as const).map(tab => (
               <button
@@ -279,23 +276,20 @@ export default function DashboardHeader({
           showDrawer ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Drawer Header with FaceForge branding */}
-        <div className="flex items-center justify-between p-4 border-b border-orange-100 bg-gradient-to-r from-orange-50/50 via-pink-50/50 to-purple-50/50">
+        {/* Drawer Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gradient-to-r from-orange-50/50 via-pink-50/50 to-purple-50/50">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 via-pink-500 to-purple-600 flex items-center justify-center shadow-md">
               <span className="text-white font-bold text-xl">F</span>
             </div>
             <div>
-              <h2 className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-orange-600 via-pink-600 to-purple-700 text-lg">
-                FaceForge
-              </h2>
-              <p className="text-xs text-gray-500">build your identity</p>
+              <h2 className="font-bold text-gray-900 text-lg">Fleex</h2>
+              <p className="text-xs text-gray-500">create, share & discover</p>
             </div>
           </div>
           <button
             onClick={() => setShowDrawer(false)}
             className="p-2 rounded-lg hover:bg-white/50 transition-colors"
-            aria-label="Close menu"
           >
             <X className="h-5 w-5 text-gray-600" />
           </button>
@@ -303,7 +297,7 @@ export default function DashboardHeader({
 
         {/* User Info */}
         {profile && (
-          <div className="p-4 border-b border-orange-100 bg-gradient-to-r from-orange-50/30 to-purple-50/30">
+          <div className="p-4 border-b border-gray-100">
             <div className="flex items-center gap-3">
               {profile?.avatar_url ? (
                 <Image 
@@ -329,14 +323,14 @@ export default function DashboardHeader({
           </div>
         )}
 
-        {/* Menu Items with FaceForge colors */}
+        {/* Menu Items */}
         <nav className="flex-1 overflow-y-auto py-2">
           {drawerMenuItems.map((item) => (
             <Link
               key={item.label}
               href={item.href}
               onClick={() => setShowDrawer(false)}
-              className="flex items-center justify-between px-4 py-3 hover:bg-gradient-to-r hover:from-orange-50 hover:to-purple-50 transition-colors group"
+              className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors group"
             >
               <div className="flex items-center gap-3">
                 <div className={`${item.color} group-hover:scale-110 transition-transform`}>
@@ -356,8 +350,8 @@ export default function DashboardHeader({
           ))}
         </nav>
 
-        {/* Footer Actions */}
-        <div className="border-t border-orange-100 p-4 space-y-3">
+        {/* Footer */}
+        <div className="border-t border-gray-100 p-4 space-y-3">
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 px-4 py-3 w-full rounded-lg hover:bg-red-50 transition-colors group"
@@ -366,12 +360,8 @@ export default function DashboardHeader({
             <span className="text-red-600 font-medium">Sign Out</span>
           </button>
           <div className="flex items-center justify-between pt-2">
-            <p className="text-[10px] text-gray-400">
-              Version 1.0.0
-            </p>
-            <div className="flex gap-2">
-              <span className="text-[10px] text-gray-400">© 2026 FaceForge</span>
-            </div>
+            <p className="text-[10px] text-gray-400">Version 1.0.0</p>
+            <p className="text-[10px] text-gray-400">© 2026 Fleex</p>
           </div>
         </div>
       </div>
@@ -403,4 +393,4 @@ export default function DashboardHeader({
       `}</style>
     </>
   )
-} 
+}
