@@ -1,7 +1,7 @@
 // app/dashboard/privacy/page.tsx
 'use client'
 
-import { Shield, Eye, Lock, Database, Globe, Clock, CheckCircle, Bell, User, Key, Fingerprint, ChevronLeft, Circle, CheckCircle2 } from 'lucide-react'
+import { Shield, Eye, Lock, Database, Globe, Clock, CheckCircle, Bell, User, Key, Fingerprint, ChevronLeft, ChevronRight, Circle, CheckCircle2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
