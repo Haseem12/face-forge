@@ -10,7 +10,7 @@ import {
   Loader2, MessageCircle, Search, ArrowLeft, 
   Users, UserPlus, Send, Check, X, MoreVertical,
   Phone, Video, Info, Smile, Paperclip, Mic,
-  CheckCheck, Clock, ArrowRight, Plus, Image,
+  CheckCheck, Clock, ArrowRight, Plus, Camera,
   Music, File, Trash2, Edit2, Copy, Reply,
   Volume2, Camera, FolderPlus, AtSign, Link2
 } from 'lucide-react'
