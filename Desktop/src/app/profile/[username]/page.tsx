@@ -18,17 +18,6 @@ import { format } from 'date-fns'
 
 type TabType = 'forges' | 'videos' | 'fleex'
 
-interface Video {
-  id: string
-  video_url: string
-  thumbnail_url: string
-  caption: string
-  view_count: number
-  like_count: number
-  comment_count: number
-  created_at: string
-}
-
 interface FleexVideo {
   id: string
   video_url: string
@@ -45,7 +34,6 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const params = use(paramsPromise)
   const [profile, setProfile] = useState<any>(null)
   const [layout, setLayout] = useState<any[]>([])
-  const [videos, setVideos] = useState<Video[]>([])
   const [fleexVideos, setFleexVideos] = useState<FleexVideo[]>([])
   const [loading, setLoading] = useState(true)
   const [isOwnProfile, setIsOwnProfile] = useState(false)
@@ -60,7 +48,6 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const [followerCount, setFollowerCount] = useState(0)
   const [followingCount, setFollowingCount] = useState(0)
   const [forgeCount, setForgeCount] = useState(0)
-  const [videosCount, setVideosCount] = useState(0)
   const [fleexCount, setFleexCount] = useState(0)
   const [followLoading, setFollowLoading] = useState(false)
 
@@ -119,28 +106,12 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
           .eq('user_id', profileData.id)
         setForgeCount(forgesCount ?? 0)
 
-        // Load videos count (from user_videos or media table)
-        const { count: userVideosCount } = await supabase
-          .from('user_videos')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', profileData.id)
-        setVideosCount(userVideosCount ?? 0)
-
-        // Load fleex count
+        // Load fleex videos count
         const { count: userFleexCount } = await supabase
           .from('user_fleex')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', profileData.id)
         setFleexCount(userFleexCount ?? 0)
-
-        // Load videos
-        const { data: videosData } = await supabase
-          .from('user_videos')
-          .select('*')
-          .eq('user_id', profileData.id)
-          .order('created_at', { ascending: false })
-          .limit(12)
-        setVideos(videosData || [])
 
         // Load fleex videos
         const { data: fleexData } = await supabase
@@ -267,7 +238,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
 
   const tabs: { key: TabType; label: string; icon: React.ElementType; count: number }[] = [
     { key: 'forges', label: 'Forges', icon: Grid3X3, count: forgeCount },
-    { key: 'videos', label: 'Videos', icon: Video, count: videosCount },
+    { key: 'videos', label: 'Videos', icon: Video, count: fleexCount },
     { key: 'fleex', label: 'Fleex', icon: Film, count: fleexCount },
   ]
 
@@ -437,7 +408,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Following</div>
           </div>
           <div className="bg-white/5 rounded-xl p-3 text-center">
-            <div className="text-xl font-black text-white">{formatNumber(forges?.[0]?.count || 0)}</div>
+            <div className="text-xl font-black text-white">{formatNumber(forgeCount)}</div>
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Forges</div>
           </div>
         </div>
@@ -526,7 +497,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
           {/* Videos Tab */}
           {activeTab === 'videos' && (
             <div>
-              {/* Create Fleex Button - Only visible on Videos tab */}
+              {/* Create Fleex Button */}
               {isOwnProfile && (
                 <Link href="/create-fleex">
                   <button className="w-full mb-4 py-3 bg-gradient-to-r from-orange-500 to-purple-600 rounded-full text-white font-semibold flex items-center justify-center gap-2 active:scale-95 transition">
@@ -536,7 +507,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
                 </Link>
               )}
               
-              {videos.length === 0 ? (
+              {fleexVideos.length === 0 ? (
                 <div className="text-center py-16">
                   <Video className="h-12 w-12 text-gray-600 mx-auto mb-3" />
                   <p className="text-gray-400">No videos yet</p>
@@ -550,7 +521,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-1">
-                  {videos.map((video) => (
+                  {fleexVideos.map((video) => (
                     <div key={video.id} className="relative aspect-[4/5] bg-white/5 cursor-pointer group">
                       {video.thumbnail_url ? (
                         <Image
