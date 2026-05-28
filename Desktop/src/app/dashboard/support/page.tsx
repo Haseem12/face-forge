@@ -2,110 +2,84 @@
 'use client'
 
 import { useState } from 'react'
-import { HelpCircle, Mail, MessageCircle, BookOpen, Video, Users, ChevronRight, Search, Send, Sparkles } from 'lucide-react'
-import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
-import Link from 'next/link'
+import { HelpCircle, Mail, MessageCircle, BookOpen, Video, Users, ChevronRight, Search, Send, Sparkles, ChevronLeft, Headphones, FileText, MessageSquare } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 export default function SupportPage() {
+  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
-  const [message, setMessage] = useState('')
 
-  const faqs = [
-    { question: 'How do I create my first forge?', answer: 'Click the Create button in the top right corner...' },
-    { question: 'How do I get more followers?', answer: 'Share your content, engage with others...' },
-    { question: 'What are the premium features?', answer: 'Premium includes unlimited forges, analytics...' },
-    { question: 'How do I report inappropriate content?', answer: 'Click the three dots on any post...' },
+  const quickActions = [
+    { icon: Headphones, label: 'Contact Support', color: 'from-orange-500 to-purple-600' },
+    { icon: FileText, label: 'FAQs', color: 'from-blue-500 to-cyan-500' },
+    { icon: MessageSquare, label: 'Community', color: 'from-green-500 to-emerald-500' },
   ]
 
-  const quickLinks = [
-    { icon: BookOpen, label: 'Documentation', description: 'Read our guides', href: '/docs' },
-    { icon: Video, label: 'Video Tutorials', description: 'Watch how-to videos', href: '/tutorials' },
-    { icon: Users, label: 'Community Forum', description: 'Ask the community', href: '/forum' },
-    { icon: Mail, label: 'Email Support', description: 'Contact our team', href: 'mailto:support@fleex.com' },
+  const faqs = [
+    { q: 'How do I create a forge?', a: 'Tap the + button and select "Create Forge"' },
+    { q: 'How do I get more followers?', a: 'Share quality content and engage with others' },
+    { q: 'What are premium features?', a: 'Unlimited forges, analytics, and more' },
   ]
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <DashboardHeader />
-      
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-orange-100 to-purple-100 mb-4">
-            <HelpCircle className="h-4 w-4 text-orange-500" />
-            <span className="text-xs font-semibold text-orange-600">Help Center</span>
-          </div>
-          <h1 className="text-3xl font-black text-gray-900 mb-3">How can we help you?</h1>
-          <p className="text-gray-500 max-w-md mx-auto">Find answers, get help, and connect with our team</p>
+    <div className="min-h-screen bg-black">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-black/80 backdrop-blur-xl border-b border-white/10">
+        <div className="px-4 py-3 flex items-center gap-3">
+          <button onClick={() => router.back()} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+            <ChevronLeft className="h-5 w-5 text-white" />
+          </button>
+          <h1 className="text-white font-semibold text-lg">Help & Support</h1>
         </div>
+      </div>
 
-        {/* Search */}
-        <div className="max-w-xl mx-auto mb-10">
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search for help..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 rounded-full border border-gray-200 focus:border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-200"
-            />
-          </div>
+      {/* Search */}
+      <div className="px-4 py-4">
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-white/30" />
+          <input
+            type="text"
+            placeholder="Search for help..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-12 pr-4 py-3 rounded-full bg-white/10 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-orange-500"
+          />
         </div>
+      </div>
 
-        {/* Quick Links */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
-          {quickLinks.map((link) => (
-            <Link key={link.label} href={link.href}>
-              <div className="bg-white rounded-xl p-4 border border-gray-100 hover:shadow-md transition text-center group">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-orange-100 to-purple-100 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition">
-                  <link.icon className="h-5 w-5 text-orange-500" />
-                </div>
-                <h3 className="font-semibold text-gray-900 text-sm">{link.label}</h3>
-                <p className="text-xs text-gray-500 mt-1">{link.description}</p>
+      {/* Quick Actions */}
+      <div className="px-4 mb-6">
+        <div className="grid grid-cols-3 gap-3">
+          {quickActions.map((action, i) => (
+            <button key={i} className="bg-white/5 rounded-xl p-4 text-center active:scale-95 transition">
+              <div className={`w-12 h-12 rounded-full bg-gradient-to-r ${action.color} flex items-center justify-center mx-auto mb-2`}>
+                <action.icon className="h-6 w-6 text-white" />
               </div>
-            </Link>
+              <p className="text-white text-xs font-medium">{action.label}</p>
+            </button>
           ))}
         </div>
+      </div>
 
-        {/* FAQ Section */}
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-10">
-          <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-orange-50 to-purple-50">
-            <h2 className="font-bold text-gray-900">Frequently Asked Questions</h2>
-          </div>
-          <div className="divide-y divide-gray-100">
-            {faqs.map((faq, i) => (
-              <div key={i} className="p-4 hover:bg-gray-50 transition cursor-pointer group">
-                <div className="flex items-center justify-between">
-                  <p className="font-medium text-gray-900">{faq.question}</p>
-                  <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-orange-500" />
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* FAQs */}
+      <div className="px-4">
+        <p className="text-white/40 text-xs font-semibold mb-3">FREQUENTLY ASKED</p>
+        <div className="space-y-2">
+          {faqs.map((faq, i) => (
+            <div key={i} className="bg-white/5 rounded-xl p-4">
+              <p className="text-white font-medium mb-1">{faq.q}</p>
+              <p className="text-white/40 text-sm">{faq.a}</p>
+            </div>
+          ))}
         </div>
+      </div>
 
-        {/* Contact Form */}
-        <div className="bg-gradient-to-r from-orange-500 to-purple-600 rounded-2xl p-6 text-white">
-          <div className="flex items-center gap-2 mb-2">
-            <MessageCircle className="h-5 w-5" />
-            <h2 className="font-bold text-lg">Still need help?</h2>
-          </div>
-          <p className="text-white/80 text-sm mb-4">Our support team is here to assist you</p>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              placeholder="Describe your issue..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              className="flex-1 px-4 py-2 rounded-full text-gray-900 placeholder:text-gray-400 focus:outline-none"
-            />
-            <button className="px-4 py-2 bg-white text-orange-600 rounded-full font-medium hover:shadow-lg transition">
-              Send
-            </button>
-          </div>
-        </div>
-      </main>
+      {/* Still Need Help */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black to-transparent">
+        <button className="w-full py-4 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full font-bold active:scale-95 transition">
+          Contact Support
+        </button>
+      </div>
     </div>
   )
 }
