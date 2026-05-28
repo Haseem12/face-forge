@@ -12,9 +12,10 @@ import {
   Edit2, ArrowLeft, Camera, Loader2, MapPin, Link2, Calendar, 
   Users, Heart, MessageCircle, Share2, MoreHorizontal, Check,
   Settings, LogOut, UserPlus, UserCheck, Sparkles, Award,
-  Grid3X3, Video, Film, Play, Plus, X, Volume2, VolumeX
+  Grid3X3, Video, Film, Play, Plus, X, Volume2, VolumeX,
+  Bookmark, Music
 } from 'lucide-react'
-import { format } from 'date-fns'
+import { formatDistanceToNow } from 'date-fns'
 
 type TabType = 'forges' | 'videos' | 'fleex'
 
@@ -44,9 +45,11 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const [activeTab, setActiveTab] = useState<TabType>('forges')
   const optionsRef = useRef<HTMLDivElement>(null)
   
-  // Video player state
+  // Fleex modal state
   const [selectedVideo, setSelectedVideo] = useState<FleexVideo | null>(null)
   const [isMuted, setIsMuted] = useState(true)
+  const [liked, setLiked] = useState(false)
+  const [saved, setSaved] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   // Ally (follow) state
@@ -73,18 +76,18 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Auto-play video when selected
+  // Auto-play video when modal opens
   useEffect(() => {
     if (selectedVideo && videoRef.current) {
       videoRef.current.play().catch(e => console.log('Auto-play error:', e))
     }
   }, [selectedVideo])
 
-  // Handle escape key to close video player
+  // Handle escape key to close modal
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && selectedVideo) {
-        setSelectedVideo(null)
+        closeVideoModal()
       }
     }
     document.addEventListener('keydown', handleEscape)
@@ -219,18 +222,35 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
     return num.toString()
   }
 
-  const openVideoPlayer = (video: FleexVideo) => {
+  const openVideoModal = (video: FleexVideo) => {
     setSelectedVideo(video)
-    // Prevent body scroll when video player is open
     document.body.style.overflow = 'hidden'
   }
 
-  const closeVideoPlayer = () => {
+  const closeVideoModal = () => {
     setSelectedVideo(null)
     document.body.style.overflow = 'unset'
     if (videoRef.current) {
       videoRef.current.pause()
     }
+  }
+
+  const toggleLike = async () => {
+    if (!selectedVideo || !currentUserId) return
+    setLiked(!liked)
+    // Add API call to save like
+  }
+
+  const toggleSave = async () => {
+    if (!selectedVideo || !currentUserId) return
+    setSaved(!saved)
+    // Add API call to save video
+  }
+
+  const shareVideo = () => {
+    if (!selectedVideo) return
+    const url = `${window.location.origin}/fleex/${selectedVideo.id}`
+    navigator.clipboard.writeText(url)
   }
 
   // Loading skeleton
@@ -558,7 +578,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
                     <div 
                       key={video.id} 
                       className="relative aspect-[4/5] bg-white/5 cursor-pointer group active:scale-95 transition-transform"
-                      onClick={() => openVideoPlayer(video)}
+                      onClick={() => openVideoModal(video)}
                     >
                       {video.thumbnail_url ? (
                         <Image
@@ -608,7 +628,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
                     <div 
                       key={video.id} 
                       className="relative aspect-[4/5] bg-white/5 cursor-pointer group active:scale-95 transition-transform"
-                      onClick={() => openVideoPlayer(video)}
+                      onClick={() => openVideoModal(video)}
                     >
                       {video.thumbnail_url ? (
                         <Image
@@ -639,14 +659,11 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
         </div>
       </div>
 
-      {/* Video Player Modal */}
+      {/* Fleex Modal - Same as Fleex page */}
       {selectedVideo && (
-        <div 
-          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
-          onClick={closeVideoPlayer}
-        >
+        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center" onClick={closeVideoModal}>
           <div className="relative w-full h-full max-w-lg mx-auto" onClick={(e) => e.stopPropagation()}>
-            {/* Video Player */}
+            {/* Video */}
             <video
               ref={videoRef}
               src={selectedVideo.video_url}
@@ -655,37 +672,111 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
               muted={isMuted}
               playsInline
               poster={selectedVideo.thumbnail_url}
-              controls
               autoPlay
             />
             
-            {/* Close Button */}
-            <button
-              onClick={closeVideoPlayer}
-              className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition"
-            >
-              <X className="h-5 w-5 text-white" />
-            </button>
+            {/* Right Side Actions */}
+            <div className="absolute right-3 bottom-28 flex flex-col items-center gap-5 z-10">
+              <button
+                onClick={toggleLike}
+                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
+              >
+                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Heart className={`h-6 w-6 ${liked ? 'fill-red-500 text-red-500' : 'text-white'}`} />
+                </div>
+                <span className="text-white text-xs font-medium">{formatNumber(selectedVideo.like_count)}</span>
+              </button>
+              
+              <button
+                onClick={() => {}}
+                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
+              >
+                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <MessageCircle className="h-6 w-6 text-white" />
+                </div>
+                <span className="text-white text-xs font-medium">{formatNumber(selectedVideo.comment_count)}</span>
+              </button>
+              
+              <button
+                onClick={toggleSave}
+                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
+              >
+                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Bookmark className={`h-6 w-6 ${saved ? 'fill-blue-500 text-blue-500' : 'text-white'}`} />
+                </div>
+                <span className="text-white text-xs font-medium">Save</span>
+              </button>
+              
+              <button
+                onClick={shareVideo}
+                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
+              >
+                <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+                  <Share2 className="h-6 w-6 text-white" />
+                </div>
+                <span className="text-white text-xs font-medium">Share</span>
+              </button>
+            </div>
+            
+            {/* Left Side Info */}
+            <div className="absolute left-3 bottom-28 z-10 max-w-[70%]">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 p-0.5">
+                  <div className="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
+                    {avatarUrl ? (
+                      <Image
+                        src={avatarUrl}
+                        alt={displayName}
+                        width={36}
+                        height={36}
+                        className="rounded-full object-cover"
+                      />
+                    ) : (
+                      <User className="h-5 w-5 text-white" />
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-white font-semibold text-sm">{displayName}</p>
+                  <p className="text-white/50 text-xs">
+                    {formatDistanceToNow(new Date(selectedVideo.created_at), { addSuffix: true })}
+                  </p>
+                </div>
+              </div>
+              
+              {selectedVideo.caption && (
+                <p className="text-white text-sm font-medium mb-2 line-clamp-2">
+                  {selectedVideo.caption}
+                </p>
+              )}
+              
+              <div className="flex items-center gap-1">
+                <Music className="h-3.5 w-3.5 text-white/60" />
+                <p className="text-white/60 text-xs">
+                  {selectedVideo.music_name || 'Original Sound'}
+                </p>
+              </div>
+            </div>
+            
+            {/* Bottom Gradient */}
+            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+            <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/30 to-transparent pointer-events-none" />
             
             {/* Sound Toggle */}
             <button
               onClick={() => setIsMuted(!isMuted)}
-              className="absolute bottom-4 right-4 w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition"
+              className="absolute bottom-28 right-3 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center z-10 active:scale-95 transition"
             >
               {isMuted ? <VolumeX className="h-5 w-5 text-white" /> : <Volume2 className="h-5 w-5 text-white" />}
             </button>
             
-            {/* Video Info */}
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
-              <p className="text-white font-medium">{selectedVideo.caption || 'Untitled'}</p>
-              <div className="flex items-center gap-3 mt-1 text-white/60 text-xs">
-                <span className="flex items-center gap-1">
-                  <Heart className="h-3 w-3" />
-                  {formatNumber(selectedVideo.like_count)}
-                </span>
-                <span>{selectedVideo.music_name || 'Original Sound'}</span>
-              </div>
-            </div>
+            {/* Close Button */}
+            <button
+              onClick={closeVideoModal}
+              className="absolute top-12 right-3 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center z-10 active:scale-95 transition"
+            >
+              <X className="h-5 w-5 text-white" />
+            </button>
           </div>
         </div>
       )}
