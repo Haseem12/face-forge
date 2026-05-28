@@ -8,12 +8,13 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import FaceCanvas from '@/components/profile/FaceCanvas'
+import { format } from 'date-fns'
 import { 
   Edit2, ArrowLeft, Camera, Loader2, MapPin, Link2, Calendar, 
   Users, Heart, MessageCircle, Share2, MoreHorizontal, Check,
   Settings, LogOut, UserPlus, UserCheck, Sparkles, Award,
   Grid3X3, Video, Film, Play, Plus, X, Volume2, VolumeX,
-  Bookmark, Music
+  Bookmark, Music, Trash2, Save
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -44,6 +45,15 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const [showOptions, setShowOptions] = useState(false)
   const [activeTab, setActiveTab] = useState<TabType>('forges')
   const optionsRef = useRef<HTMLDivElement>(null)
+  
+  // Edit mode states
+  const [isEditingCover, setIsEditingCover] = useState(false)
+  const [isEditingAvatar, setIsEditingAvatar] = useState(false)
+  const [tempAvatarPreview, setTempAvatarPreview] = useState<string | null>(null)
+  const [tempCoverPreview, setTempCoverPreview] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const coverInputRef = useRef<HTMLInputElement>(null)
   
   // Fleex modal state
   const [selectedVideo, setSelectedVideo] = useState<FleexVideo | null>(null)
@@ -222,6 +232,139 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
     return num.toString()
   }
 
+  // Image upload handlers
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file')
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image must be less than 5MB')
+      return
+    }
+
+    setUploading(true)
+    const preview = URL.createObjectURL(file)
+    setTempAvatarPreview(preview)
+    setIsEditingAvatar(true)
+    setUploading(false)
+  }
+
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file')
+      return
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Cover image must be less than 10MB')
+      return
+    }
+
+    setUploading(true)
+    const preview = URL.createObjectURL(file)
+    setTempCoverPreview(preview)
+    setIsEditingCover(true)
+    setUploading(false)
+  }
+
+  const saveAvatar = async () => {
+    if (!tempAvatarPreview) return
+    
+    setUploading(true)
+    try {
+      // Convert preview to file and upload
+      const response = await fetch(tempAvatarPreview)
+      const blob = await response.blob()
+      const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' })
+      
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user')
+
+      const fileName = `${user.id}/avatar/${Date.now()}.jpg`
+      const { error: uploadError } = await supabase.storage
+        .from('profiles')
+        .upload(fileName, file)
+
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('profiles')
+        .getPublicUrl(fileName)
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id)
+
+      if (updateError) throw updateError
+
+      setProfile({ ...profile, avatar_url: publicUrl })
+      setIsEditingAvatar(false)
+      setTempAvatarPreview(null)
+    } catch (error) {
+      console.error('Error saving avatar:', error)
+      alert('Failed to save avatar')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const saveCover = async () => {
+    if (!tempCoverPreview) return
+    
+    setUploading(true)
+    try {
+      const response = await fetch(tempCoverPreview)
+      const blob = await response.blob()
+      const file = new File([blob], 'cover.jpg', { type: 'image/jpeg' })
+      
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('No user')
+
+      const fileName = `${user.id}/cover/${Date.now()}.jpg`
+      const { error: uploadError } = await supabase.storage
+        .from('profiles')
+        .upload(fileName, file)
+
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('profiles')
+        .getPublicUrl(fileName)
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ cover_url: publicUrl })
+        .eq('id', user.id)
+
+      if (updateError) throw updateError
+
+      setProfile({ ...profile, cover_url: publicUrl })
+      setIsEditingCover(false)
+      setTempCoverPreview(null)
+    } catch (error) {
+      console.error('Error saving cover:', error)
+      alert('Failed to save cover')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const cancelEdit = () => {
+    setIsEditingAvatar(false)
+    setIsEditingCover(false)
+    setTempAvatarPreview(null)
+    setTempCoverPreview(null)
+  }
+
   const openVideoModal = (video: FleexVideo) => {
     setSelectedVideo(video)
     document.body.style.overflow = 'hidden'
@@ -238,13 +381,11 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const toggleLike = async () => {
     if (!selectedVideo || !currentUserId) return
     setLiked(!liked)
-    // Add API call to save like
   }
 
   const toggleSave = async () => {
     if (!selectedVideo || !currentUserId) return
     setSaved(!saved)
-    // Add API call to save video
   }
 
   const shareVideo = () => {
@@ -322,13 +463,12 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
               </button>
               {showOptions && (
                 <div className="absolute right-0 mt-2 w-48 bg-gray-900 rounded-xl shadow-lg border border-white/10 overflow-hidden z-20 animate-fade-in">
-                  <button
-                    onClick={() => router.push('/settings/profile')}
-                    className="w-full px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10 flex items-center gap-2"
-                  >
-                    <Settings className="h-4 w-4" />
-                    Settings
-                  </button>
+                  <Link href="/settings/profile">
+                    <button className="w-full px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10 flex items-center gap-2">
+                      <Settings className="h-4 w-4" />
+                      Settings
+                    </button>
+                  </Link>
                   <button
                     onClick={handleLogout}
                     className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-white/10 flex items-center gap-2"
@@ -343,11 +483,11 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
         </div>
       </div>
 
-      {/* Cover Image / Banner */}
-      <div className="relative w-full h-48 sm:h-56 overflow-hidden">
-        {coverUrl ? (
+      {/* Cover Image / Banner with edit button */}
+      <div className="relative w-full h-48 sm:h-56 overflow-hidden group">
+        {(tempCoverPreview || coverUrl) ? (
           <Image
-            src={coverUrl}
+            src={tempCoverPreview || coverUrl!}
             alt={`${displayName} cover`}
             fill
             className="object-cover"
@@ -360,26 +500,71 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
         
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
 
+        {/* Cover edit buttons for own profile */}
         {isOwnProfile && (
-          <button
-            onClick={() => router.push('/settings/profile')}
-            className="absolute bottom-3 right-3 flex items-center gap-2 px-3 py-2 bg-black/50 backdrop-blur-md rounded-full text-white text-xs font-semibold"
-          >
-            <Camera className="w-3 h-3" />
-            <span className="hidden sm:inline">Edit Cover</span>
-          </button>
+          <div className="absolute bottom-3 right-3 flex gap-2">
+            {isEditingCover ? (
+              <>
+                <button
+                  onClick={saveCover}
+                  disabled={uploading}
+                  className="flex items-center gap-2 px-3 py-2 bg-green-500 rounded-full text-white text-xs font-semibold"
+                >
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Save
+                </button>
+                <button
+                  onClick={cancelEdit}
+                  className="flex items-center gap-2 px-3 py-2 bg-red-500 rounded-full text-white text-xs font-semibold"
+                >
+                  <X className="h-4 w-4" />
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => coverInputRef.current?.click()}
+                  className="flex items-center gap-2 px-3 py-2 bg-black/50 backdrop-blur-md rounded-full text-white text-xs font-semibold"
+                >
+                  <Camera className="h-4 w-4" />
+                  Change Cover
+                </button>
+                {coverUrl && (
+                  <button
+                    onClick={() => {
+                      setTempCoverPreview(null)
+                      saveCover()
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 bg-red-500/80 rounded-full text-white text-xs font-semibold"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Remove
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         )}
+        
+        <input
+          ref={coverInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleCoverUpload}
+          className="hidden"
+        />
       </div>
 
       {/* Profile Body */}
       <div className="max-w-2xl mx-auto px-4">
-        {/* Avatar & Identity */}
+        {/* Avatar with edit button */}
         <div className="relative flex flex-col sm:flex-row items-start sm:items-end gap-4 mb-4 -mt-12 sm:-mt-14">
           <div className="relative group">
             <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-4 border-black bg-black shadow-xl overflow-hidden">
-              {avatarUrl ? (
+              {(tempAvatarPreview || avatarUrl) ? (
                 <Image
-                  src={avatarUrl}
+                  src={tempAvatarPreview || avatarUrl!}
                   alt={displayName}
                   width={112}
                   height={112}
@@ -392,15 +577,58 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
                 </div>
               )}
             </div>
+            
+            {/* Avatar edit buttons for own profile */}
             {isOwnProfile && (
-              <button
-                onClick={() => router.push('/settings/profile')}
-                className="absolute bottom-0 right-0 p-1.5 bg-orange-500 rounded-full border-2 border-black shadow-lg"
-              >
-                <Camera className="w-3 h-3 text-white" />
-              </button>
+              <div className="absolute -bottom-2 -right-2">
+                {isEditingAvatar ? (
+                  <div className="flex gap-1">
+                    <button
+                      onClick={saveAvatar}
+                      disabled={uploading}
+                      className="p-1.5 bg-green-500 rounded-full shadow-lg"
+                    >
+                      {uploading ? <Loader2 className="h-3 w-3 animate-spin text-white" /> : <Check className="h-3 w-3 text-white" />}
+                    </button>
+                    <button
+                      onClick={cancelEdit}
+                      className="p-1.5 bg-red-500 rounded-full shadow-lg"
+                    >
+                      <X className="h-3 w-3 text-white" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => avatarInputRef.current?.click()}
+                      className="p-1.5 bg-orange-500 rounded-full shadow-lg"
+                    >
+                      <Camera className="h-3 w-3 text-white" />
+                    </button>
+                    {avatarUrl && (
+                      <button
+                        onClick={() => {
+                          setTempAvatarPreview(null)
+                          saveAvatar()
+                        }}
+                        className="p-1.5 bg-red-500 rounded-full shadow-lg ml-1"
+                      >
+                        <Trash2 className="h-3 w-3 text-white" />
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             )}
           </div>
+          
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleAvatarUpload}
+            className="hidden"
+          />
 
           <div className="flex-1 pb-1">
             <div className="flex items-center gap-2 flex-wrap">
@@ -472,7 +700,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
           {isOwnProfile ? (
             <Link href="/settings/profile">
               <button className="w-full py-3 bg-white/10 rounded-full text-white font-semibold hover:bg-white/20 transition active:scale-95">
-                Edit Profile
+                Edit Profile Info
               </button>
             </Link>
           ) : currentUserId ? (
@@ -659,11 +887,10 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
         </div>
       </div>
 
-      {/* Fleex Modal - Same as Fleex page */}
+      {/* Fleex Modal */}
       {selectedVideo && (
         <div className="fixed inset-0 z-50 bg-black flex items-center justify-center" onClick={closeVideoModal}>
           <div className="relative w-full h-full max-w-lg mx-auto" onClick={(e) => e.stopPropagation()}>
-            {/* Video */}
             <video
               ref={videoRef}
               src={selectedVideo.video_url}
@@ -687,10 +914,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
                 <span className="text-white text-xs font-medium">{formatNumber(selectedVideo.like_count)}</span>
               </button>
               
-              <button
-                onClick={() => {}}
-                className="flex flex-col items-center gap-0.5 active:scale-95 transition"
-              >
+              <button className="flex flex-col items-center gap-0.5 active:scale-95 transition">
                 <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
                   <MessageCircle className="h-6 w-6 text-white" />
                 </div>
@@ -758,7 +982,7 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
               </div>
             </div>
             
-            {/* Bottom Gradient */}
+            {/* Gradients */}
             <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
             <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/30 to-transparent pointer-events-none" />
             
