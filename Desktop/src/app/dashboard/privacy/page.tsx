@@ -1,167 +1,77 @@
 // app/dashboard/privacy/page.tsx
 'use client'
 
-import { Shield, Eye, Database, Lock, Globe, Clock, CheckCircle, Video } from 'lucide-react'
-import Link from 'next/link'
-import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
+import { Shield, Eye, Lock, Database, Globe, Clock, CheckCircle, Bell, User, Key, Fingerprint, ChevronLeft, Circle, CheckCircle2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 
 export default function PrivacyPage() {
+  const router = useRouter()
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
+  const [privateAccount, setPrivateAccount] = useState(true)
+
+  const privacySettings = [
+    { icon: Eye, label: 'Private Account', description: 'Only followers can see your content', value: privateAccount, onToggle: setPrivateAccount },
+    { icon: Key, label: 'Two-Factor Authentication', description: 'Extra security layer', value: twoFactorEnabled, onToggle: setTwoFactorEnabled },
+    { icon: Database, label: 'Download Your Data', description: 'Get a copy of your information', rightIcon: true },
+    { icon: Lock, label: 'Change Password', description: 'Update your password', rightIcon: true },
+    { icon: Fingerprint, label: 'Biometric Login', description: 'Use Face ID / Fingerprint', toggle: true, value: false },
+  ]
+
   return (
-    <div className="bg-gray-50 min-h-screen">
-      <DashboardHeader />
-      
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          {/* Header */}
-          <div className="bg-gradient-to-r from-orange-500 to-purple-600 px-6 py-8 text-white">
-            <div className="flex items-center gap-3 mb-3">
-              <Shield className="h-8 w-8" />
-              <h1 className="text-2xl font-bold">Privacy Policy</h1>
+    <div className="min-h-screen bg-black">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-black/80 backdrop-blur-xl border-b border-white/10">
+        <div className="px-4 py-3 flex items-center gap-3">
+          <button onClick={() => router.back()} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+            <ChevronLeft className="h-5 w-5 text-white" />
+          </button>
+          <h1 className="text-white font-semibold text-lg">Privacy & Security</h1>
+        </div>
+      </div>
+
+      {/* Settings */}
+      <div className="divide-y divide-white/10">
+        {privacySettings.map((item, i) => (
+          <div key={i} className="px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+                <item.icon className="h-5 w-5 text-orange-500" />
+              </div>
+              <div>
+                <p className="text-white font-medium">{item.label}</p>
+                <p className="text-white/40 text-xs">{item.description}</p>
+              </div>
             </div>
-            <p className="text-white/80 text-sm">
-              Last updated: {new Date().toLocaleDateString()}
-            </p>
+            {'toggle' in item ? (
+              <button
+                onClick={() => item.onToggle(!item.value)}
+                className={`w-11 h-6 rounded-full transition ${item.value ? 'bg-orange-500' : 'bg-white/20'}`}
+              >
+                <div className={`w-5 h-5 rounded-full bg-white mt-0.5 transition ${item.value ? 'ml-5' : 'ml-0.5'}`} />
+              </button>
+            ) : item.rightIcon ? (
+              <ChevronRight className="h-4 w-4 text-white/40" />
+            ) : null}
           </div>
-          
-          <div className="p-6 space-y-8">
-            {/* Introduction */}
-            <section>
-              <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <Eye className="h-5 w-5 text-orange-500" />
-                Your Privacy Matters
-              </h2>
-              <p className="text-gray-600 leading-relaxed">
-                At FaceForge, we take your privacy seriously. This policy describes how we collect, 
-                use, and protect your personal information when you use our platform.
-              </p>
-            </section>
-            
-            {/* Information We Collect */}
-            <section>
-              <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <Database className="h-5 w-5 text-orange-500" />
-                Information We Collect
-              </h2>
-              <ul className="space-y-2 text-gray-600">
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong className="text-gray-800">Account Information:</strong> Name, email, username, profile picture</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong className="text-gray-800">Content You Create:</strong> Videos, captions, comments, and interactions</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong className="text-gray-800">Video Data:</strong> Your uploaded reels, thumbnails, and video metadata</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong className="text-gray-800">Interaction Data:</strong> Likes, follows, shares, and comments on videos</span>
-                </li>
-              </ul>
-            </section>
-            
-            {/* Video Content Section */}
-            <section>
-              <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <Video className="h-5 w-5 text-orange-500" />
-                Video Content
-              </h2>
-              <ul className="space-y-2 text-gray-600">
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>All videos you upload are stored securely in our cloud storage</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>You can delete your videos at any time</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Videos are visible to your followers based on your privacy settings</span>
-                </li>
-              </ul>
-            </section>
-            
-            {/* How We Use Your Information */}
-            <section>
-              <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <Globe className="h-5 w-5 text-orange-500" />
-                How We Use Your Information
-              </h2>
-              <ul className="space-y-2 text-gray-600">
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Provide and improve our video streaming service</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Personalize your reels feed</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Analyze video performance and engagement</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Ensure platform safety and content moderation</span>
-                </li>
-              </ul>
-            </section>
-            
-            {/* Data Security */}
-            <section>
-              <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <Lock className="h-5 w-5 text-orange-500" />
-                Data Security
-              </h2>
-              <p className="text-gray-600 leading-relaxed">
-                We use industry-standard security measures to protect your data, including encryption, 
-                secure servers, and regular security audits. Your video content is stored in secured 
-                cloud storage with access controls.
-              </p>
-            </section>
-            
-            {/* Your Rights */}
-            <section>
-              <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <Clock className="h-5 w-5 text-orange-500" />
-                Your Rights
-              </h2>
-              <ul className="space-y-2 text-gray-600">
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Access and download your data</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Delete your account and associated videos</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Control who sees your videos (public/private)</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span>Opt out of analytics tracking</span>
-                </li>
-              </ul>
-            </section>
-            
-            {/* Contact */}
-            <section className="bg-gray-50 rounded-xl p-4">
-              <h2 className="font-bold text-gray-900 mb-2">Questions?</h2>
-              <p className="text-sm text-gray-600">
-                If you have any questions about this Privacy Policy, please contact us at:
-              </p>
-              <p className="text-sm text-orange-600 mt-2">
-                privacy@faceforge.com
-              </p>
-            </section>
+        ))}
+      </div>
+
+      {/* Danger Zone */}
+      <div className="mt-6 px-4">
+        <p className="text-white/40 text-xs font-semibold mb-3">DANGER ZONE</p>
+        <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-red-400 font-medium">Delete Account</p>
+              <p className="text-red-400/50 text-xs">Permanently delete your account</p>
+            </div>
+            <button className="px-4 py-2 bg-red-500/20 rounded-full text-red-400 text-sm">
+              Delete
+            </button>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   )
 }
