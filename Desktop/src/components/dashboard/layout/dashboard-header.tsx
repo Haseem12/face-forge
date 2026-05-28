@@ -96,7 +96,7 @@ export default function DashboardHeader({
 
   // Drawer menu items
   const drawerMenuItems = [
-    { icon: User, label: 'Profile', href: `/profile/${profile?.username || 'me'}`, color: 'text-orange-500' },
+    { icon: User, label: 'Profile', href: '/profile', color: 'text-orange-500' },
     { icon: CreditCard, label: 'Subscription', href: '/dashboard/subscription', color: 'text-pink-500', badge: 'Pro' },
     { icon: Settings, label: 'Settings', href: '/dashboard/settings', color: 'text-purple-600' },
     { icon: Gem, label: 'Premium Features', href: '/dashboard/premium', color: 'text-amber-500' },
