@@ -12,7 +12,7 @@ import {
   Phone, Video, Info, Smile, Paperclip, Mic,
   CheckCheck, Clock, ArrowRight, Plus, Camera,
   Music, File, Trash2, Edit2, Copy, Reply,
-  Volume2, Camera, FolderPlus, AtSign, Link2
+  Volume2, FolderPlus, AtSign, Link2
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
