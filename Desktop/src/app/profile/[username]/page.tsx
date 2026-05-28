@@ -14,8 +14,9 @@ import {
   Users, Heart, MessageCircle, Share2, MoreHorizontal, Check,
   Settings, LogOut, UserPlus, UserCheck, Sparkles, Award,
   Grid3X3, Video, Film, Play, Plus, X, Volume2, VolumeX,
-  Bookmark, Music, Trash2, Save
+  Bookmark, Music, Trash2, Save, User  // ← Add User here
 } from 'lucide-react'
+
 import { formatDistanceToNow } from 'date-fns'
 
 type TabType = 'forges' | 'videos' | 'fleex'
