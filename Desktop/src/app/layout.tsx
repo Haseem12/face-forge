@@ -8,10 +8,11 @@ import './globals.css'
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
-export const metadata: Metadata = {
-  title: 'FaceForge - Build Your Digital Identity',
-  description: 'FaceForge: Where creators forge their digital presence through customizable micro-apps.',
-  generator: 'v0.app',
+
+export const metadata = {
+  title: 'Fleex - Create, Share & Discover Short Videos',
+  description: 'Join Fleex to create amazing short videos, discover creators, and build your community',
+  generator: 'Sagheer Muhd - Sagheer+ Lab',
   icons: {
     icon: [
       {
