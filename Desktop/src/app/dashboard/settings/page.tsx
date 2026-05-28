@@ -2,92 +2,94 @@
 'use client'
 
 import { useState } from 'react'
-import { Bell, Lock, Eye, Palette, Globe, Smartphone, Moon, Sun, User, Mail, Shield, ChevronRight } from 'lucide-react'
-import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
+import { Bell, Lock, Palette, Globe, Moon, Sun, User, Mail, Shield, ChevronRight, ChevronLeft, Circle, CheckCircle2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 export default function SettingsPage() {
-  const [darkMode, setDarkMode] = useState(false)
+  const router = useRouter()
+  const [darkMode, setDarkMode] = useState(true)
   const [notifications, setNotifications] = useState(true)
-  const [emailNotifications, setEmailNotifications] = useState(true)
+  const [privateAccount, setPrivateAccount] = useState(false)
 
   const settingsSections = [
     {
       title: 'Account',
-      icon: User,
-      color: 'text-orange-500',
       items: [
-        { label: 'Profile Information', description: 'Update your personal info', href: '/settings/profile' },
-        { label: 'Email Address', description: 'Change your email', href: '/settings/email' },
-        { label: 'Password', description: 'Update your password', href: '/settings/password' },
+        { icon: User, label: 'Profile Information', subtitle: 'Name, username, bio' },
+        { icon: Mail, label: 'Email Address', subtitle: 'haseemsg@gmail.com' },
+        { icon: Lock, label: 'Password', subtitle: 'Last changed 2 months ago' },
       ]
     },
     {
       title: 'Preferences',
-      icon: Palette,
-      color: 'text-purple-500',
       items: [
-        { label: 'Appearance', description: 'Light / Dark mode', href: '/settings/appearance' },
-        { label: 'Language', description: 'Select your preferred language', href: '/settings/language' },
-        { label: 'Content Preferences', description: 'Manage your feed', href: '/settings/content' },
+        { icon: Palette, label: 'Appearance', subtitle: darkMode ? 'Dark mode' : 'Light mode', toggle: true, value: darkMode, onToggle: setDarkMode },
+        { icon: Globe, label: 'Language', subtitle: 'English', rightIcon: true },
       ]
     },
     {
       title: 'Notifications',
-      icon: Bell,
-      color: 'text-pink-500',
       items: [
-        { label: 'Push Notifications', description: 'Get alerts on your device', href: '/settings/push' },
-        { label: 'Email Digest', description: 'Weekly summary of activity', href: '/settings/digest' },
-        { label: 'Mentions & Tags', description: 'When someone mentions you', href: '/settings/mentions' },
+        { icon: Bell, label: 'Push Notifications', subtitle: 'Get alerts', toggle: true, value: notifications, onToggle: setNotifications },
       ]
     },
     {
-      title: 'Privacy & Security',
-      icon: Shield,
-      color: 'text-blue-500',
+      title: 'Privacy',
       items: [
-        { label: 'Privacy Settings', description: 'Control your visibility', href: '/settings/privacy' },
-        { label: 'Two-Factor Auth', description: 'Extra security layer', href: '/settings/2fa' },
-        { label: 'Connected Apps', description: 'Manage third-party access', href: '/settings/apps' },
-        { label: 'Data Export', description: 'Download your data', href: '/settings/export' },
+        { icon: Shield, label: 'Private Account', subtitle: 'Only followers can see your content', toggle: true, value: privateAccount, onToggle: setPrivateAccount },
       ]
     },
   ]
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <DashboardHeader />
-      
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-black text-gray-900">Settings</h1>
-          <p className="text-gray-500 text-sm">Manage your account preferences</p>
+    <div className="min-h-screen bg-black">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-black/80 backdrop-blur-xl border-b border-white/10">
+        <div className="px-4 py-3 flex items-center gap-3">
+          <button onClick={() => router.back()} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+            <ChevronLeft className="h-5 w-5 text-white" />
+          </button>
+          <h1 className="text-white font-semibold text-lg">Settings</h1>
         </div>
+      </div>
 
-        <div className="space-y-6">
-          {settingsSections.map((section) => (
-            <div key={section.title} className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-              <div className="p-4 border-b border-gray-100 flex items-center gap-2">
-                <section.icon className={`h-5 w-5 ${section.color}`} />
-                <h2 className="font-bold text-gray-900">{section.title}</h2>
-              </div>
-              <div className="divide-y divide-gray-50">
-                {section.items.map((item) => (
-                  <div key={item.label} className="p-4 hover:bg-gray-50 transition cursor-pointer group">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-gray-900">{item.label}</p>
-                        <p className="text-xs text-gray-500">{item.description}</p>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-orange-500 transition" />
+      {/* Settings List */}
+      <div className="divide-y divide-white/10">
+        {settingsSections.map((section, idx) => (
+          <div key={idx} className="px-4 py-3">
+            <p className="text-white/40 text-xs font-semibold mb-2 tracking-wider">{section.title}</p>
+            <div className="space-y-1">
+              {section.items.map((item, i) => (
+                <div
+                  key={i}
+                  onClick={() => item.rightIcon && router.push(`/settings/${item.label.toLowerCase().replace(/\s/g, '-')}`)}
+                  className={`flex items-center justify-between py-3 ${item.rightIcon ? 'cursor-pointer' : ''}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+                      <item.icon className="h-5 w-5 text-orange-500" />
+                    </div>
+                    <div>
+                      <p className="text-white font-medium">{item.label}</p>
+                      <p className="text-white/40 text-xs">{item.subtitle}</p>
                     </div>
                   </div>
-                ))}
-              </div>
+                  {item.toggle ? (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); item.onToggle(!item.value) }}
+                      className={`w-11 h-6 rounded-full transition ${item.value ? 'bg-orange-500' : 'bg-white/20'}`}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white mt-0.5 transition ${item.value ? 'ml-5' : 'ml-0.5'}`} />
+                    </button>
+                  ) : item.rightIcon ? (
+                    <ChevronRight className="h-4 w-4 text-white/40" />
+                  ) : null}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </main>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
