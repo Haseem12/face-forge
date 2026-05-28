@@ -1,11 +1,12 @@
-// app/settings/profile/page.tsx
+// app/settings/profile/page.tsx - Updated version
+
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, Camera, Loader2, Save, X, User, Image as ImageIcon, Trash2, Check } from 'lucide-react'
+import { ArrowLeft, Camera, Loader2, Save, User, Image as ImageIcon, Trash2, Check } from 'lucide-react'
 
 export default function SettingsProfilePage() {
   const [loading, setLoading] = useState(true)
@@ -14,12 +15,11 @@ export default function SettingsProfilePage() {
   const [displayName, setDisplayName] = useState('')
   const [username, setUsername] = useState('')
   const [bio, setBio] = useState('')
-  const [location, setLocation] = useState('')
-  const [website, setWebsite] = useState('')
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [coverUrl, setCoverUrl] = useState<string | null>(null)
-  const [uploadingAvatar, setUploadingAvatar] = useState(false)
-  const [uploadingCover, setUploadingCover] = useState(false)
+  
+  // Only include columns that exist in your table
+  // Remove location and website if they don't exist yet
   
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
@@ -50,8 +50,6 @@ export default function SettingsProfilePage() {
         setDisplayName(profileData.display_name || '')
         setUsername(profileData.username || '')
         setBio(profileData.bio || '')
-        setLocation(profileData.location || '')
-        setWebsite(profileData.website || '')
         setAvatarUrl(profileData.avatar_url)
         setCoverUrl(profileData.cover_url)
       }
@@ -101,12 +99,12 @@ export default function SettingsProfilePage() {
       return
     }
 
-    setUploadingAvatar(true)
+    setSaving(true)
     const publicUrl = await uploadImage(file, 'avatar')
     if (publicUrl) {
       setAvatarUrl(publicUrl)
     }
-    setUploadingAvatar(false)
+    setSaving(false)
   }
 
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,12 +121,12 @@ export default function SettingsProfilePage() {
       return
     }
 
-    setUploadingCover(true)
+    setSaving(true)
     const publicUrl = await uploadImage(file, 'cover')
     if (publicUrl) {
       setCoverUrl(publicUrl)
     }
-    setUploadingCover(false)
+    setSaving(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -139,18 +137,22 @@ export default function SettingsProfilePage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('No user')
 
+      // Only update columns that exist
+      const updateData: any = {
+        display_name: displayName,
+        username: username.toLowerCase().replace(/[^a-z0-9_]/g, ''),
+        bio: bio,
+        avatar_url: avatarUrl,
+        cover_url: coverUrl,
+        updated_at: new Date().toISOString()
+      }
+
+      // Only add location and website if columns exist
+      // You can check by trying to update or skip them for now
+
       const { error } = await supabase
         .from('profiles')
-        .update({
-          display_name: displayName,
-          username: username.toLowerCase().replace(/[^a-z0-9_]/g, ''),
-          bio: bio,
-          location: location,
-          website: website,
-          avatar_url: avatarUrl,
-          cover_url: coverUrl,
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', user.id)
 
       if (error) throw error
@@ -205,10 +207,10 @@ export default function SettingsProfilePage() {
             )}
             <button
               onClick={() => coverInputRef.current?.click()}
-              disabled={uploadingCover}
+              disabled={saving}
               className="absolute bottom-3 right-3 px-3 py-2 bg-black/50 rounded-full text-white text-xs font-semibold flex items-center gap-1"
             >
-              {uploadingCover ? <Loader2 className="h-3 w-3 animate-spin" /> : <Camera className="h-3 w-3" />}
+              <Camera className="h-3 w-3" />
               Change
             </button>
             <input ref={coverInputRef} type="file" accept="image/*" onChange={handleCoverUpload} className="hidden" />
@@ -231,10 +233,10 @@ export default function SettingsProfilePage() {
               </div>
               <button
                 onClick={() => avatarInputRef.current?.click()}
-                disabled={uploadingAvatar}
+                disabled={saving}
                 className="absolute -bottom-1 -right-1 p-1.5 bg-orange-500 rounded-full"
               >
-                {uploadingAvatar ? <Loader2 className="h-3 w-3 animate-spin text-white" /> : <Camera className="h-3 w-3 text-white" />}
+                <Camera className="h-3 w-3 text-white" />
               </button>
               <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
             </div>
@@ -274,29 +276,9 @@ export default function SettingsProfilePage() {
               className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-orange-500 resize-none"
               placeholder="Tell us about yourself"
               rows={3}
+              maxLength={150}
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-white/80 mb-1">Location</label>
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-orange-500"
-              placeholder="City, Country"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-white/80 mb-1">Website</label>
-            <input
-              type="url"
-              value={website}
-              onChange={(e) => setWebsite(e.target.value)}
-              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-orange-500"
-              placeholder="https://yourwebsite.com"
-            />
+            <p className="text-xs text-gray-500 text-right mt-1">{bio.length}/150</p>
           </div>
         </div>
       </div>
