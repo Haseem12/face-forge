@@ -41,18 +41,20 @@ interface Fleex {
   thumbnail_url: string
   caption: string
   music_name: string
+  music_artist: string
   view_count: number
   like_count: number
   comment_count: number
   share_count: number
   duration: number
   created_at: string
-  display_name?: string
-  username?: string
-  avatar_url?: string
-  is_official?: boolean
-  is_verified?: boolean
-  is_youtube?: boolean
+  profiles?: {
+    display_name: string
+    username: string
+    avatar_url: string
+    is_official: boolean
+    is_verified: boolean
+  }
 }
 
 export default function FleexPage() {
@@ -79,7 +81,6 @@ export default function FleexPage() {
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
-  const iframeRefs = useRef<(HTMLIFrameElement | null)[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const observerTarget = useRef<HTMLDivElement>(null)
   const ITEMS_PER_PAGE = 10
@@ -119,48 +120,102 @@ export default function FleexPage() {
     if (pageNum > 1) setIsLoadingMore(true)
     
     try {
-      // Build URL with filters
-      let url = `/api/fleex/feed?page=${pageNum}&limit=${ITEMS_PER_PAGE}&category=${encodeURIComponent(category)}`
+      // Get official accounts first
+      const { data: officialAccounts } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('is_official', true)
       
-      // Add order by for trending
+      const officialIds = officialAccounts?.map(a => a.id) || []
+      
+      // Build query
+      let query = supabase
+        .from('user_fleex')
+        .select(`
+          *,
+          profiles:user_id (
+            display_name,
+            username,
+            avatar_url,
+            is_official,
+            is_verified
+          )
+        `)
+        .eq('is_private', false)
+        .range((pageNum - 1) * ITEMS_PER_PAGE, pageNum * ITEMS_PER_PAGE - 1)
+      
+      // Apply ordering
       if (category === 'Trending') {
-        url += '&orderBy=views'
+        query = query.order('view_count', { ascending: false })
+      } else {
+        query = query.order('created_at', { ascending: false })
       }
       
-      const response = await fetch(url)
-      const data = await response.json()
+      // Apply category filter (search in caption)
+      if (category !== 'For You' && category !== 'Trending') {
+        query = query.ilike('caption', `%${category}%`)
+      }
       
-      // Get user's liked and saved videos for this batch
-      if (currentUser && data.fleex?.length) {
-        const videoIds = data.fleex.map((v: Fleex) => v.id)
+      const { data: videosData, error } = await query
+      
+      if (error) {
+        console.error('Supabase error:', error)
+        throw error
+      }
+      
+      if (!videosData || videosData.length === 0) {
+        if (pageNum === 1) setFleex([])
+        setHasMore(false)
+        setLoading(false)
+        setIsLoadingMore(false)
+        return
+      }
+      
+      // Transform data to include profile info directly
+      const transformedVideos = videosData.map(video => ({
+        ...video,
+        display_name: video.profiles?.display_name,
+        username: video.profiles?.username,
+        avatar_url: video.profiles?.avatar_url,
+        is_official: video.profiles?.is_official,
+        is_verified: video.profiles?.is_verified
+      }))
+      
+      // Sort: official content first, then by date
+      const sortedVideos = transformedVideos.sort((a, b) => {
+        const aIsOfficial = officialIds.includes(a.user_id)
+        const bIsOfficial = officialIds.includes(b.user_id)
+        if (aIsOfficial && !bIsOfficial) return -1
+        if (!aIsOfficial && bIsOfficial) return 1
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      })
+      
+      if (pageNum === 1 || refresh) {
+        setFleex(sortedVideos)
+        setPage(1)
+        setCurrentIndex(0)
+        // Reset scroll position
+        if (containerRef.current && refresh) {
+          containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+        }
+      } else {
+        setFleex(prev => [...prev, ...sortedVideos])
+      }
+      
+      setHasMore(videosData.length === ITEMS_PER_PAGE)
+      
+      // Get user's likes and saves
+      if (currentUser && sortedVideos.length) {
+        const videoIds = sortedVideos.map(v => v.id)
         
         const [{ data: likes }, { data: saves }] = await Promise.all([
           supabase.from('fleex_likes').select('fleex_id').eq('user_id', currentUser.id).in('fleex_id', videoIds),
           supabase.from('fleex_saves').select('fleex_id').eq('user_id', currentUser.id).in('fleex_id', videoIds)
         ])
         
-        setLikedFleex(prev => {
-          const newSet = new Set(prev)
-          likes?.forEach(l => newSet.add(l.fleex_id))
-          return newSet
-        })
-        
-        setSavedFleex(prev => {
-          const newSet = new Set(prev)
-          saves?.forEach(s => newSet.add(s.fleex_id))
-          return newSet
-        })
+        setLikedFleex(new Set(likes?.map(l => l.fleex_id) || []))
+        setSavedFleex(new Set(saves?.map(s => s.fleex_id) || []))
       }
-      
-      if (pageNum === 1 || refresh) {
-        setFleex(data.fleex || [])
-        setPage(1)
-        setCurrentIndex(0)
-      } else {
-        setFleex(prev => [...prev, ...(data.fleex || [])])
-      }
-      
-      setHasMore(data.hasMore || false)
     } catch (error) {
       console.error('Error fetching fleex:', error)
     } finally {
@@ -193,7 +248,7 @@ export default function FleexPage() {
     
     const observer = new IntersectionObserver(
       async (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading && !refreshing && !isLoadingMore) {
+        if (entries[0].isIntersecting && hasMore && !loading && !refreshing && !isLoadingMore && fleex.length > 0) {
           const nextPage = page + 1
           setPage(nextPage)
           await fetchFleex(nextPage, selectedCategory)
@@ -207,7 +262,7 @@ export default function FleexPage() {
     }
     
     return () => observer.disconnect()
-  }, [hasMore, loading, refreshing, isLoadingMore, page, hasSetInterest, selectedCategory])
+  }, [hasMore, loading, refreshing, isLoadingMore, page, hasSetInterest, selectedCategory, fleex.length])
 
   // Video scroll handling with autoplay
   const handleScroll = useCallback(() => {
@@ -218,20 +273,11 @@ export default function FleexPage() {
     const newIndex = Math.round(scrollTop / videoHeight)
     
     if (newIndex !== currentIndex && newIndex >= 0 && newIndex < fleex.length) {
-      // Pause all videos
-      videoRefs.current.forEach(video => {
-        if (video) video.pause()
-      })
+      // Pause previous video
+      const prevVideo = videoRefs.current[currentIndex]
+      if (prevVideo) prevVideo.pause()
       
       setCurrentIndex(newIndex)
-      
-      // Preload and play new video
-      setTimeout(() => {
-        const newVideo = videoRefs.current[newIndex]
-        if (newVideo) {
-          newVideo.play().catch(e => console.log('Play error:', e))
-        }
-      }, 50)
     }
   }, [currentIndex, fleex.length])
 
@@ -243,13 +289,11 @@ export default function FleexPage() {
     }
   }, [handleScroll])
 
-  // Autoplay current video
+  // Autoplay current video when it becomes visible
   useEffect(() => {
-    if (currentIndex >= 0 && videoRefs.current[currentIndex]) {
-      const currentVideo = videoRefs.current[currentIndex]
-      if (currentVideo) {
-        currentVideo.play().catch(e => console.log('Auto-play error:', e))
-      }
+    const currentVideo = videoRefs.current[currentIndex]
+    if (currentVideo && currentVideo.readyState >= 2) {
+      currentVideo.play().catch(e => console.log('Auto-play error:', e))
     }
   }, [currentIndex])
 
@@ -347,12 +391,15 @@ export default function FleexPage() {
   const handleRefresh = async () => {
     setRefreshing(true)
     await fetchFleex(1, selectedCategory, true)
-    
-    // Scroll to top
-    if (containerRef.current) {
-      containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
-    }
   }
+
+  // Debug: Log official videos count
+  useEffect(() => {
+    if (fleex.length > 0) {
+      const officialCount = fleex.filter(v => v.is_official).length
+      console.log(`Total videos: ${fleex.length}, Official videos: ${officialCount}`)
+    }
+  }, [fleex])
 
   // Category Selection Modal
   if (showCategoryModal) {
@@ -474,11 +521,11 @@ export default function FleexPage() {
                 playsInline
                 poster={item.thumbnail_url}
                 onEnded={() => handleVideoEnded(index)}
-                preload={Math.abs(index - currentIndex) < 3 ? 'auto' : 'none'}
+                preload="metadata"
               />
               
               {/* Loading Overlay */}
-              {index === currentIndex && !videoRefs.current[currentIndex]?.readyState && (
+              {index === currentIndex && videoRefs.current[currentIndex]?.readyState < 2 && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                   <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
                 </div>
@@ -521,7 +568,8 @@ export default function FleexPage() {
                 
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(window.location.href)
+                    const url = `${window.location.origin}/fleex/${item.id}`
+                    navigator.clipboard.writeText(url)
                   }}
                   className="flex flex-col items-center gap-0.5 active:scale-95 transition"
                 >
