@@ -1,7 +1,7 @@
 {
   "name": "fleex",
   "version": "1.0.0",
-  "description": "Fleex - Create, share, and discover short videos"
+  "description": "Fleex - Create, share, and discover short videos",
   "private": true,
   "scripts": {
     "dev": "next dev",
