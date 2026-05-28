@@ -12,7 +12,7 @@ import {
   Edit2, ArrowLeft, Camera, Loader2, MapPin, Link2, Calendar, 
   Users, Heart, MessageCircle, Share2, MoreHorizontal, Check,
   Settings, LogOut, UserPlus, UserCheck, Sparkles, Award,
-  Grid3X3, Video, Film, Play, Plus
+  Grid3X3, Video, Film, Play, Plus, X, Volume2, VolumeX
 } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -20,6 +20,7 @@ type TabType = 'forges' | 'videos' | 'fleex'
 
 interface FleexVideo {
   id: string
+  user_id: string
   video_url: string
   thumbnail_url: string
   caption: string
@@ -42,6 +43,11 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
   const [showOptions, setShowOptions] = useState(false)
   const [activeTab, setActiveTab] = useState<TabType>('forges')
   const optionsRef = useRef<HTMLDivElement>(null)
+  
+  // Video player state
+  const [selectedVideo, setSelectedVideo] = useState<FleexVideo | null>(null)
+  const [isMuted, setIsMuted] = useState(true)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   // Ally (follow) state
   const [isFollowing, setIsFollowing] = useState(false)
@@ -66,6 +72,24 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // Auto-play video when selected
+  useEffect(() => {
+    if (selectedVideo && videoRef.current) {
+      videoRef.current.play().catch(e => console.log('Auto-play error:', e))
+    }
+  }, [selectedVideo])
+
+  // Handle escape key to close video player
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedVideo) {
+        setSelectedVideo(null)
+      }
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [selectedVideo])
 
   useEffect(() => {
     if (!mounted || !params?.username) return
@@ -155,7 +179,6 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
     if (!currentUserId || !profile || followLoading) return
     const wasFollowing = isFollowing
     
-    // Optimistic update
     setIsFollowing(!wasFollowing)
     setFollowerCount(c => wasFollowing ? Math.max(0, c - 1) : c + 1)
     setFollowLoading(true)
@@ -178,7 +201,6 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
       }
     } catch (err) {
       console.error('[Follow error]:', err)
-      // Revert on error
       setIsFollowing(wasFollowing)
       setFollowerCount(c => wasFollowing ? c + 1 : Math.max(0, c - 1))
     } finally {
@@ -195,6 +217,20 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
     return num.toString()
+  }
+
+  const openVideoPlayer = (video: FleexVideo) => {
+    setSelectedVideo(video)
+    // Prevent body scroll when video player is open
+    document.body.style.overflow = 'hidden'
+  }
+
+  const closeVideoPlayer = () => {
+    setSelectedVideo(null)
+    document.body.style.overflow = 'unset'
+    if (videoRef.current) {
+      videoRef.current.pause()
+    }
   }
 
   // Loading skeleton
@@ -302,10 +338,8 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
           <div className="absolute inset-0 bg-gradient-to-r from-orange-500 via-pink-500 to-purple-600" />
         )}
         
-        {/* Gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
 
-        {/* Edit cover button */}
         {isOwnProfile && (
           <button
             onClick={() => router.push('/settings/profile')}
@@ -497,7 +531,6 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
           {/* Videos Tab */}
           {activeTab === 'videos' && (
             <div>
-              {/* Create Fleex Button */}
               {isOwnProfile && (
                 <Link href="/create-fleex">
                   <button className="w-full mb-4 py-3 bg-gradient-to-r from-orange-500 to-purple-600 rounded-full text-white font-semibold flex items-center justify-center gap-2 active:scale-95 transition">
@@ -522,7 +555,11 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
               ) : (
                 <div className="grid grid-cols-3 gap-1">
                   {fleexVideos.map((video) => (
-                    <div key={video.id} className="relative aspect-[4/5] bg-white/5 cursor-pointer group">
+                    <div 
+                      key={video.id} 
+                      className="relative aspect-[4/5] bg-white/5 cursor-pointer group active:scale-95 transition-transform"
+                      onClick={() => openVideoPlayer(video)}
+                    >
                       {video.thumbnail_url ? (
                         <Image
                           src={video.thumbnail_url}
@@ -568,7 +605,11 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
               ) : (
                 <div className="grid grid-cols-3 gap-1">
                   {fleexVideos.map((video) => (
-                    <div key={video.id} className="relative aspect-[4/5] bg-white/5 cursor-pointer group">
+                    <div 
+                      key={video.id} 
+                      className="relative aspect-[4/5] bg-white/5 cursor-pointer group active:scale-95 transition-transform"
+                      onClick={() => openVideoPlayer(video)}
+                    >
                       {video.thumbnail_url ? (
                         <Image
                           src={video.thumbnail_url}
@@ -597,6 +638,57 @@ export default function ProfilePage({ params: paramsPromise }: { params: Promise
           )}
         </div>
       </div>
+
+      {/* Video Player Modal */}
+      {selectedVideo && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
+          onClick={closeVideoPlayer}
+        >
+          <div className="relative w-full h-full max-w-lg mx-auto" onClick={(e) => e.stopPropagation()}>
+            {/* Video Player */}
+            <video
+              ref={videoRef}
+              src={selectedVideo.video_url}
+              className="w-full h-full object-contain"
+              loop
+              muted={isMuted}
+              playsInline
+              poster={selectedVideo.thumbnail_url}
+              controls
+              autoPlay
+            />
+            
+            {/* Close Button */}
+            <button
+              onClick={closeVideoPlayer}
+              className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition"
+            >
+              <X className="h-5 w-5 text-white" />
+            </button>
+            
+            {/* Sound Toggle */}
+            <button
+              onClick={() => setIsMuted(!isMuted)}
+              className="absolute bottom-4 right-4 w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition"
+            >
+              {isMuted ? <VolumeX className="h-5 w-5 text-white" /> : <Volume2 className="h-5 w-5 text-white" />}
+            </button>
+            
+            {/* Video Info */}
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
+              <p className="text-white font-medium">{selectedVideo.caption || 'Untitled'}</p>
+              <div className="flex items-center gap-3 mt-1 text-white/60 text-xs">
+                <span className="flex items-center gap-1">
+                  <Heart className="h-3 w-3" />
+                  {formatNumber(selectedVideo.like_count)}
+                </span>
+                <span>{selectedVideo.music_name || 'Original Sound'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         @keyframes fade-in {
