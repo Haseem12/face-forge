@@ -13,6 +13,9 @@ export default function MobileBottomNav() {
   const pathname = usePathname()
   const supabase = createClient()
 
+  // Pages where the bottom nav SHOULD appear
+  const navPages = ['/dashboard', '/search', '/fleex']
+
   useEffect(() => {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -74,8 +77,8 @@ export default function MobileBottomNav() {
     }
   }, [supabase, user?.id])
 
-  // Hide on auth, onboarding, or landing pages
-  if (!user || pathname?.startsWith('/auth/') || pathname?.startsWith('/onboarding') || pathname === '/') {
+  // Only show on specified pages when user is authenticated
+  if (!user || !navPages.includes(pathname)) {
     return null
   }
 
