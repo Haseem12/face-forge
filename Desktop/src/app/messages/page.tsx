@@ -14,7 +14,8 @@ import {
   Music, File, Edit2, Image as ImageIcon,
   Download, Trash2, ExternalLink, Crown,
   Shield, UserMinus, Pencil, CameraIcon,
-  Megaphone, Volume2, VolumeX, Play, Pause
+  Megaphone, Volume2, VolumeX, Play, Pause,
+  FolderPlus 
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
