@@ -230,97 +230,110 @@ export default function MessagesPage() {
     }
   }, [selectedChat])
 
-  const fetchChats = async () => {
-    if (!currentUserId) return
-    setLoading(true)
-    try {
-      const { data: participants } = await supabase
-        .from('conversation_participants')
-        .select('conversation_id')
-        .eq('user_id', currentUserId)
+ const fetchChats = async () => {
+  if (!currentUserId) return
+  setLoading(true)
+  try {
+    const { data: participants } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', currentUserId)
 
-      const directChats: ChatItem[] = []
+    const directChats: ChatItem[] = []
 
-      if (participants?.length) {
-        for (const p of participants) {
-          const { data: conv } = await supabase
-            .from('conversations')
-            .select('*, messages(*)')
-            .eq('id', p.conversation_id)
-            .single()
+    if (participants?.length) {
+      for (const p of participants) {
+        // Fetch conversation without messages join
+        const { data: conv } = await supabase
+          .from('conversations')
+          .select('*')
+          .eq('id', p.conversation_id)
+          .single()
 
-          if (conv) {
-            const { data: otherParticipants } = await supabase
-              .from('conversation_participants')
-              .select('user_id')
-              .eq('conversation_id', conv.id)
-              .neq('user_id', currentUserId)
+        if (conv) {
+          // Fetch other participant
+          const { data: otherParticipants } = await supabase
+            .from('conversation_participants')
+            .select('user_id')
+            .eq('conversation_id', conv.id)
+            .neq('user_id', currentUserId)
 
-            if (otherParticipants?.length) {
-              const { data: otherUser } = await supabase
-                .from('profiles')
+          if (otherParticipants?.length) {
+            const { data: otherUser } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', otherParticipants[0].user_id)
+              .single()
+
+            if (otherUser) {
+              // Fetch last message separately
+              const { data: messages } = await supabase
+                .from('messages')
                 .select('*')
-                .eq('id', otherParticipants[0].user_id)
-                .single()
+                .eq('conversation_id', conv.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
 
-              if (otherUser) {
-                const messages = conv.messages || []
-                const lastMessage = messages.sort((a: any, b: any) =>
-                  new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                )[0]
-                const unreadCount = messages.filter((m: any) =>
-                  m.user_id !== currentUserId && !m.is_read
-                ).length
+              const lastMessage = messages?.[0] || null
 
-                directChats.push({
-                  id: conv.id,
-                  type: 'direct',
-                  name: otherUser.display_name,
-                  avatar_url: otherUser.avatar_url,
-                  other_user: otherUser,
-                  last_message: lastMessage ? {
-                    id: lastMessage.id,
-                    content: lastMessage.content,
-                    created_at: lastMessage.created_at,
-                    user_id: lastMessage.user_id,
-                    is_read: lastMessage.is_read
-                  } : null,
-                  unread_count: unreadCount,
-                  updated_at: conv.updated_at
-                })
-              }
+              // Count unread
+              const { count: unreadCount } = await supabase
+                .from('messages')
+                .select('*', { count: 'exact', head: true })
+                .eq('conversation_id', conv.id)
+                .neq('user_id', currentUserId)
+                .is('is_read', false)
+
+              directChats.push({
+                id: conv.id,
+                type: 'direct',
+                name: otherUser.display_name,
+                avatar_url: otherUser.avatar_url,
+                other_user: otherUser,
+                last_message: lastMessage ? {
+                  id: lastMessage.id,
+                  content: lastMessage.content,
+                  created_at: lastMessage.created_at,
+                  user_id: lastMessage.user_id,
+                  is_read: lastMessage.is_read
+                } : null,
+                unread_count: unreadCount || 0,
+                updated_at: conv.updated_at || conv.created_at
+              })
             }
           }
         }
       }
-
-      const { data: groupMemberships } = await supabase
-        .from('group_members')
-        .select('group_id, groups(*)')
-        .eq('user_id', currentUserId)
-
-      const groupChats: ChatItem[] = (groupMemberships || []).map((gm: any) => ({
-        id: gm.group_id,
-        type: 'group',
-        name: gm.groups.name,
-        avatar_url: gm.groups.avatar_url,
-        group: gm.groups,
-        last_message: null,
-        unread_count: 0,
-        updated_at: gm.groups.updated_at
-      }))
-
-      const allChats = [...directChats, ...groupChats].sort((a, b) =>
-        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-      )
-
-      setChats(allChats)
-    } catch (error) {
-      console.error('Failed to fetch chats:', error)
-    } finally {
-      setLoading(false)
     }
+
+    // Fetch group memberships
+    const { data: groupMemberships } = await supabase
+      .from('group_members')
+      .select('group_id, groups(*)')
+      .eq('user_id', currentUserId)
+
+    const groupChats: ChatItem[] = (groupMemberships || []).map((gm: any) => ({
+      id: gm.group_id,
+      type: 'group',
+      name: gm.groups?.name || 'Unknown Group',
+      avatar_url: gm.groups?.avatar_url,
+      group: gm.groups,
+      last_message: null,
+      unread_count: 0,
+      updated_at: gm.groups?.updated_at || new Date().toISOString()
+    }))
+
+    const allChats = [...directChats, ...groupChats].sort((a, b) =>
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    )
+
+    setChats(allChats)
+  } catch (error) {
+    console.error('Failed to fetch chats:', error)
+  } finally {
+    setLoading(false)
   }
+}
 
   const fetchAllies = async () => {
     if (!currentUserId) return
