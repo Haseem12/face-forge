@@ -713,7 +713,7 @@ export default function MessagesPage() {
     <div className="h-[100dvh] flex flex-col bg-white overflow-hidden fixed inset-0">
       {/* ── CHAT LIST ── */}
       <div className={`flex flex-col bg-white h-full ${selectedChat ? 'hidden md:flex md:w-[380px] md:flex-shrink-0 md:border-r md:border-gray-200' : 'flex flex-1'}`}>
-        <div className="px-4 pt-14 pb-2 bg-white flex-shrink-0">
+        <div className="px-4 pt-10 pb-2 bg-white flex-shrink-0">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <button onClick={() => router.back()} className="w-8 h-8 flex items-center justify-center rounded-full active:bg-gray-100 transition-colors"><ArrowLeft className="h-5 w-5 text-gray-900" /></button>
@@ -763,7 +763,7 @@ export default function MessagesPage() {
       <div className={`flex-1 flex flex-col bg-white ${!selectedChat ? 'hidden md:flex' : 'flex absolute md:relative inset-0 z-20 md:z-auto'}`}>
         {selectedChat ? (
           <>
-            <div className="flex-shrink-0 bg-white/95 backdrop-blur-xl border-b border-gray-200 px-3 pt-12 pb-2">
+            <div className="flex-shrink-0 bg-white/95 backdrop-blur-xl border-b border-gray-200 px-3 pt-10 pb-2">
               <div className="flex items-center gap-2">
                 <button onClick={() => setSelectedChat(null)} className="md:hidden w-9 h-9 flex items-center justify-center rounded-full active:bg-gray-100 transition-colors mr-1"><ArrowLeft className="h-5 w-5 text-gray-900" /></button>
                 <Link href={selectedChat.type === 'direct' ? `/profile/${selectedChat.other_user?.username}` : '#'} className="flex items-center gap-2.5 flex-1 min-w-0">
@@ -878,7 +878,7 @@ export default function MessagesPage() {
       {/* ── NEW CHAT MODAL ── */}
       {showNewChatModal && (
         <div className="fixed inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-bottom duration-300">
-          <div className="px-4 pt-14 pb-2 flex-shrink-0">
+          <div className="px-4 pt-10 pb-2 flex-shrink-0">
             <div className="flex items-center justify-between mb-4"><button onClick={() => setShowNewChatModal(false)} className="w-8 h-8 flex items-center justify-center rounded-full active:bg-gray-100"><X className="h-5 w-5 text-gray-900" /></button><span className="text-gray-900 text-lg font-bold">New Message</span><div className="w-8" /></div>
             <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><input type="text" placeholder="Search people" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2.5 text-sm bg-gray-100 text-gray-900 placeholder-gray-400 rounded-xl focus:outline-none" autoFocus /></div>
           </div>
@@ -900,7 +900,7 @@ export default function MessagesPage() {
       {/* ── NEW GROUP MODAL ── */}
       {showNewGroupModal && (
         <div className="fixed inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-bottom duration-300">
-          <div className="px-4 pt-14 pb-2 flex-shrink-0">
+          <div className="px-4 pt-10 pb-2 flex-shrink-0">
             <div className="flex items-center justify-between mb-6"><button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); setNewGroupMembers([]) }} className="w-8 h-8 flex items-center justify-center rounded-full active:bg-gray-100"><X className="h-5 w-5 text-gray-900" /></button><span className="text-gray-900 text-lg font-bold">New Group</span><button onClick={createGroup} disabled={!newGroupName.trim() || newGroupMembers.length === 0 || creatingGroup} className="text-blue-500 font-semibold text-sm disabled:opacity-40 active:text-blue-400">{creatingGroup ? 'Creating...' : 'Create'}</button></div>
             <div className="flex items-center gap-3 mb-4"><div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0"><Camera className="h-5 w-5 text-gray-400" /></div><input type="text" placeholder="Group name" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="flex-1 bg-transparent text-gray-900 text-lg placeholder-gray-400 focus:outline-none" autoFocus /></div>
             <div className="relative mb-2"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><input type="text" placeholder="Search people to add" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2.5 text-sm bg-gray-100 text-gray-900 placeholder-gray-400 rounded-xl focus:outline-none" /></div>
@@ -923,7 +923,7 @@ export default function MessagesPage() {
       {/* ── GROUP SETTINGS MODAL ── */}
       {showGroupSettingsModal && selectedChat?.type === 'group' && (
         <div className="fixed inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-bottom duration-300">
-          <div className="px-4 pt-14 pb-2 flex-shrink-0 overflow-y-auto">
+          <div className="px-4 pt-10 pb-2 flex-shrink-0 overflow-y-auto">
             <div className="flex items-center justify-between mb-6"><button onClick={() => setShowGroupSettingsModal(false)} className="w-8 h-8 flex items-center justify-center rounded-full active:bg-gray-100"><X className="h-5 w-5 text-gray-900" /></button><span className="text-gray-900 text-lg font-bold">Group Settings</span><div className="w-8" /></div>
             <div className="relative w-full h-32 bg-gray-100 rounded-xl overflow-hidden mb-4 group">
               {selectedChat.group?.cover_url ? <Image src={selectedChat.group.cover_url} alt="Cover" fill className="object-cover" /> : null}
