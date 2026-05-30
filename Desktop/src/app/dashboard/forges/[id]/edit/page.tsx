@@ -17,10 +17,6 @@ import {
   Upload, FileArchive, X, Loader2, Play, Smartphone, Monitor,
   ExternalLink, RefreshCw
 } from 'lucide-react'
-import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
-import StoriesStrip from '@/components/dashboard/layout/stories-strip'
-import StoryViewer from '@/components/dashboard/stories/story-viewer'
-import Image from 'next/image'
 
 interface Forge {
   id: string
@@ -31,6 +27,8 @@ interface Forge {
   preview_token: string | null
   is_published?: boolean
   config?: any
+  created_by?: string
+  user_id?: string
 }
 
 interface ForgeFile {
@@ -78,12 +76,6 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
   const [showPublishModal, setShowPublishModal] = useState(false)
   const [activeTab, setActiveTab] = useState('preview')
 
-  // Stories strip state
-  const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
-  const [followedProfiles, setFollowedProfiles] = useState<any[]>([])
-  const [suggestedUsers, setSuggestedUsers] = useState<any[]>([])
-  const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
-
   // ZIP Upload state
   const [zipFile, setZipFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -93,37 +85,18 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
   const fileInputRef = useRef<HTMLInputElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
-  // Load user data
+  // Get current user
   useEffect(() => {
-    const loadUserData = async () => {
+    const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/auth/login'); return }
-      setCurrentUserId(user.id)
-
-      const { data: myProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-      setCurrentUserProfile(myProfile)
-
-      const { data: allies } = await supabase.from('allies').select('following_id').eq('follower_id', user.id)
-      const followingIds = (allies || []).map((a: any) => a.following_id)
-
-      if (followingIds.length > 0) {
-        const { data: fp } = await supabase.from('profiles').select('id, display_name, username, avatar_url').in('id', followingIds)
-        setFollowedProfiles(fp || [])
+      if (!user) {
+        router.push('/auth/login')
+        return
       }
-
-      const { data: usersList } = await supabase.from('profiles').select('id, display_name, username, avatar_url').neq('id', user.id).limit(12)
-      const suggested = (usersList || []).filter((u: any) => !followingIds.includes(u.id))
-      setSuggestedUsers(suggested)
+      setCurrentUserId(user.id)
     }
-    loadUserData()
+    getUser()
   }, [supabase, router])
-
-  // Combine users for StoriesStrip
-  const usersWithSelf: any[] = []
-  const seen = new Set<string>()
-  if (currentUserProfile) { usersWithSelf.push(currentUserProfile); seen.add(currentUserProfile.id) }
-  followedProfiles.forEach(p => { if (!seen.has(p.id)) { usersWithSelf.push(p); seen.add(p.id) } })
-  suggestedUsers.forEach(u => { if (!seen.has(u.id)) { usersWithSelf.push(u); seen.add(u.id) } })
 
   // Load forge data
   useEffect(() => {
@@ -144,33 +117,26 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
           setPreviewUrl(`/preview/${forgeData.id}`)
         }
 
-        // Load files if collaborative
         if (forgeData.is_collaborative) {
+          // Load files
           const filesRes = await fetch(`/api/forges/files?forge_id=${params.id}`)
           if (filesRes.ok) {
             const filesData = await filesRes.json()
             setFiles(filesData.files || [])
           }
 
+          // Load contributors
           const contribRes = await fetch(`/api/forges/contributors?forge_id=${params.id}`)
           if (contribRes.ok) {
             const contribData = await contribRes.json()
             setContributors(contribData.contributors || [])
-            if (currentUserId) {
-              const owner = contribData.contributors?.find((c: Contributor) => c.user_id === currentUserId && c.role === 'owner')
-              setIsOwner(!!owner)
-            }
           }
 
+          // Load comments
           const commentsRes = await fetch(`/api/forges/comments?forge_id=${params.id}`)
           if (commentsRes.ok) {
             const commentsData = await commentsRes.json()
             setComments(commentsData.comments || [])
-          }
-        } else {
-          // For non-collaborative, check ownership via created_by
-          if (forgeData.created_by === currentUserId || forgeData.user_id === currentUserId) {
-            setIsOwner(true)
           }
         }
       } catch (error) {
@@ -181,9 +147,23 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
     }
 
     loadForge()
-  }, [params, currentUserId])
+  }, [params])
 
-  // ZIP Upload handler
+  // Check ownership when forge and user are loaded
+  useEffect(() => {
+    if (forge && currentUserId) {
+      if (forge.is_collaborative) {
+        const owner = contributors.find(
+          (c: Contributor) => c.user_id === currentUserId && c.role === 'owner'
+        )
+        setIsOwner(!!owner)
+      } else {
+        setIsOwner(forge.created_by === currentUserId || forge.user_id === currentUserId)
+      }
+    }
+  }, [forge, currentUserId, contributors])
+
+  // ZIP Upload handlers
   const handleZipSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
@@ -209,7 +189,6 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
       })
 
       if (uploadResponse.ok) {
-        const uploadResult = await uploadResponse.json()
         setPreviewUrl(`/preview/${forge.id}?v=${Date.now()}`)
         setPreviewKey(prev => prev + 1)
         setZipFile(null)
@@ -239,7 +218,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
       })
       if (res.ok) {
         const data = await res.json()
-        setFiles([...files, data.file])
+        setFiles(prev => [...prev, data.file])
         refreshPreview()
       }
     } catch (error) {
@@ -255,7 +234,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         body: JSON.stringify({ file_id: fileId, content }),
       })
       if (res.ok) {
-        setFiles(files.map(f => f.id === fileId ? { ...f, content } : f))
+        setFiles(prev => prev.map(f => f.id === fileId ? { ...f, content } : f))
         refreshPreview()
       }
     } catch (error) {
@@ -271,7 +250,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         body: JSON.stringify({ file_id: fileId }),
       })
       if (res.ok) {
-        setFiles(files.filter(f => f.id !== fileId))
+        setFiles(prev => prev.filter(f => f.id !== fileId))
         refreshPreview()
       }
     } catch (error) {
@@ -289,7 +268,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
       })
       if (res.ok) {
         const data = await res.json()
-        setContributors([...contributors, data.contributor])
+        setContributors(prev => [...prev, data.contributor])
       }
     } catch (error) {
       console.error('Error adding contributor:', error)
@@ -305,7 +284,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         body: JSON.stringify({ forge_id: forge.id, user_id: userId }),
       })
       if (res.ok) {
-        setContributors(contributors.filter(c => c.user_id !== userId))
+        setContributors(prev => prev.filter(c => c.user_id !== userId))
       }
     } catch (error) {
       console.error('Error removing contributor:', error)
@@ -322,7 +301,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
       })
       if (res.ok) {
         const data = await res.json()
-        setComments([...comments, data.comment])
+        setComments(prev => [...prev, data.comment])
       }
     } catch (error) {
       console.error('Error adding comment:', error)
@@ -337,7 +316,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         body: JSON.stringify({ comment_id: commentId }),
       })
       if (res.ok) {
-        setComments(comments.filter(c => c.id !== commentId))
+        setComments(prev => prev.filter(c => c.id !== commentId))
       }
     } catch (error) {
       console.error('Error deleting comment:', error)
@@ -378,28 +357,29 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
     }
   }
 
+  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <DashboardHeader activeTab="forYou" onTabChange={() => {}} userId={currentUserId || undefined} />
         <div className="max-w-6xl mx-auto px-4 py-6">
-          <Skeleton className="w-64 h-8 mb-4" />
+          
+          <Skeleton className="w-48 h-8 mb-4" />
           <Skeleton className="w-full h-96 rounded-xl" />
         </div>
       </div>
     )
   }
 
+  // Not found state
   if (notFound || !forge) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <DashboardHeader activeTab="forYou" onTabChange={() => {}} userId={currentUserId || undefined} />
-        <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
-          <div className="text-center px-4">
-            <h1 className="text-2xl md:text-4xl font-bold text-gray-900 mb-2">Forge not found</h1>
-            <p className="text-gray-600 mb-4">The forge you're looking for doesn't exist.</p>
-            <Link href="/dashboard"><Button>Back to Dashboard</Button></Link>
-          </div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center px-4">
+          <h1 className="text-2xl md:text-4xl font-bold text-gray-900 mb-2">Forge not found</h1>
+          <p className="text-gray-600 mb-4">The forge you're looking for doesn't exist.</p>
+          <Link href="/dashboard">
+            <Button>Back to Dashboard</Button>
+          </Link>
         </div>
       </div>
     )
@@ -407,10 +387,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <DashboardHeader activeTab="forYou" onTabChange={() => {}} userId={currentUserId || undefined} />
-      <StoriesStrip users={usersWithSelf} currentUserId={currentUserId} onOpenStory={setViewingStoryUserId} />
-
-      <div className="max-w-6xl mx-auto px-4 py-4 md:py-6 pb-24 md:pb-12">
+ <div className="max-w-6xl mx-auto px-4 py-4 md:py-6 pb-6 md:pb-8">
         {/* Mobile back button */}
         <button onClick={() => router.back()} className="md:hidden flex items-center gap-1 text-gray-600 mb-4">
           <ChevronLeft className="w-5 h-5" />
@@ -421,7 +398,10 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 mb-6">
           <div>
             <h1 className="text-xl md:text-3xl font-black text-gray-900">{forge.name}</h1>
-            <p className="text-xs md:text-sm text-gray-600 mt-1">
+            {forge.description && (
+              <p className="text-sm text-gray-500 mt-1 line-clamp-1">{forge.description}</p>
+            )}
+            <p className="text-xs text-gray-400 mt-1">
               {forge.is_collaborative ? '🤝 Collaborative' : '👤 Solo'} • {forge.is_public_preview ? '🌍 Public' : '🔒 Private'} {forge.is_published && '• ✅ Published'}
             </p>
           </div>
@@ -441,7 +421,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
           </div>
         </div>
 
-        {/* Tabs - Mobile: scrollable, Desktop: grid */}
+        {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="w-full grid grid-cols-4 mb-6 bg-white border border-gray-200 p-1 rounded-lg gap-1">
             <TabsTrigger value="preview" className="gap-1.5 flex items-center text-xs md:text-sm px-2">
@@ -464,7 +444,6 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
           {/* PREVIEW TAB */}
           <TabsContent value="preview" className="space-y-4">
-            {/* ZIP Upload Card */}
             {isOwner && (
               <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-3">
@@ -500,9 +479,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
               </div>
             )}
 
-            {/* Preview Area */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-              {/* Preview Toolbar */}
               <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <button
@@ -530,12 +507,11 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
                 </div>
               </div>
 
-              {/* Preview Iframe */}
               {previewUrl ? (
                 <div className={showMobilePreview ? 'flex justify-center bg-gray-800 p-4' : ''}>
                   <div
                     className={showMobilePreview ? 'rounded-2xl overflow-hidden border-4 border-gray-700 shadow-2xl' : 'w-full'}
-                    style={showMobilePreview ? { maxWidth: 375, height: 600 } : { height: 'calc(100vh - 400px)', minHeight: 400 }}
+                    style={showMobilePreview ? { maxWidth: 375, height: 600 } : { height: 'calc(100vh - 350px)', minHeight: 400 }}
                   >
                     {showMobilePreview && (
                       <div className="bg-gray-800 px-3 py-1.5 flex items-center gap-2">
@@ -566,7 +542,6 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
               )}
             </div>
 
-            {/* Public Preview Toggle */}
             {isOwner && (
               <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                 <label className="flex items-start gap-3 cursor-pointer">
@@ -655,10 +630,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
         </div>
       )}
 
-      {viewingStoryUserId && (
-        <StoryViewer userId={viewingStoryUserId} onClose={() => setViewingStoryUserId(null)} />
-      )}
-
+      {/* Publish Modal */}
       <PublishForgeModal
         forgeId={forge?.id || ''}
         forgeName={forge?.name || ''}
