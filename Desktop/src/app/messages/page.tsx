@@ -412,7 +412,7 @@ export default function MessagesPage() {
     .select(`
       user_id,
       role,
-      profiles:profiles!group_members_user_id_fkey(
+      profiles:profiles!group_members_user_id_profiles_fkey(
         id,
         display_name,
         username,
@@ -856,7 +856,7 @@ export default function MessagesPage() {
   if (!currentUserId) return null
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-black overflow-hidden relative">
+    <div className="h-[100dvh] flex flex-col bg-white overflow-hidden fixed inset-0">
       {/* ── CHAT LIST ── */}
       <div className={`flex flex-col bg-black h-full ${selectedChat ? 'hidden md:flex md:w-[380px] md:flex-shrink-0 md:border-r md:border-zinc-800' : 'flex flex-1'}`}>
         {/* Header */}
