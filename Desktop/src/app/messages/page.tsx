@@ -15,7 +15,7 @@ import {
   Download, Trash2, ExternalLink, Crown,
   Shield, UserMinus, Pencil, CameraIcon,
   Megaphone, Volume2, VolumeX, Play, Pause,
-  FolderPlus 
+  FolderPlus, ArrowRight
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -115,7 +115,7 @@ export default function MessagesPage() {
 
   // New group state
   const [newGroupName, setNewGroupName] = useState('')
-  const [selectedMembers, setSelectedMembers] = useState<string[]>([])
+  const [newGroupMembers, setNewGroupMembers] = useState<string[]>([])
   const [creatingGroup, setCreatingGroup] = useState(false)
 
   // Group settings state
@@ -133,7 +133,6 @@ export default function MessagesPage() {
   const groupAvatarInputRef = useRef<HTMLInputElement>(null)
   const groupCoverInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const sentMessageIds = useRef<Set<string>>(new Set())
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -224,7 +223,6 @@ export default function MessagesPage() {
     if (selectedChat) {
       fetchMessages(selectedChat)
       markChatAsRead(selectedChat.id)
-      // Check admin status for groups
       if (selectedChat.type === 'group') {
         checkAdminStatus(selectedChat.id)
         fetchGroupMembers(selectedChat.id)
@@ -414,7 +412,6 @@ export default function MessagesPage() {
       .select('user_id, role, profiles(*)')
       .eq('group_id', groupId)
     setGroupMembers(data || [])
-    // Update group description
     const { data: groupData } = await supabase
       .from('groups')
       .select('description')
@@ -470,7 +467,7 @@ export default function MessagesPage() {
   }
 
   const createGroup = async () => {
-    if (!currentUserId || !newGroupName.trim() || selectedMembers.length === 0) return
+    if (!currentUserId || !newGroupName.trim() || newGroupMembers.length === 0) return
 
     setCreatingGroup(true)
     try {
@@ -482,14 +479,14 @@ export default function MessagesPage() {
           name: newGroupName.trim(),
           created_by: currentUserId,
           invite_code: inviteCode,
-          member_count: selectedMembers.length + 1
+          member_count: newGroupMembers.length + 1
         })
         .select()
         .single()
 
       if (groupError) throw groupError
 
-      const members = [...selectedMembers, currentUserId].map(userId => ({
+      const members = [...newGroupMembers, currentUserId].map(userId => ({
         group_id: group.id,
         user_id: userId,
         role: userId === currentUserId ? 'admin' : 'member'
@@ -503,7 +500,7 @@ export default function MessagesPage() {
 
       setShowNewGroupModal(false)
       setNewGroupName('')
-      setSelectedMembers([])
+      setNewGroupMembers([])
       await fetchChats()
     } catch (error) {
       console.error('Failed to create group:', error)
@@ -591,7 +588,11 @@ export default function MessagesPage() {
           .from('chat_media')
           .getPublicUrl(fileName)
         urls.push(publicUrl)
-        types.push(file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'file')
+        types.push(
+          file.type.startsWith('image/') ? 'image' :
+          file.type.startsWith('video/') ? 'video' :
+          file.type.startsWith('audio/') ? 'audio' : 'file'
+        )
       }
     }
 
@@ -618,21 +619,32 @@ export default function MessagesPage() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm'
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType })
       mediaRecorderRef.current = mediaRecorder
-      audioChunksRef.current = []
+      const chunks: Blob[] = []
 
       mediaRecorder.ondataavailable = (event) => {
-        audioChunksRef.current.push(event.data)
+        if (event.data.size > 0) {
+          chunks.push(event.data)
+        }
       }
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' })
-        const { urls } = await uploadMedia([audioFile])
-        if (urls[0] && selectedChat) {
-          await sendMediaMessage(urls[0], 'audio')
+        const audioBlob = new Blob(chunks, { type: mimeType })
+        const fileName = `voice_${Date.now()}.webm`
+        const audioFile = new File([audioBlob], fileName, { type: mimeType })
+
+        if (selectedChat) {
+          const { urls } = await uploadMedia([audioFile])
+          if (urls[0]) {
+            await sendMediaMessage(urls[0], 'audio')
+          }
         }
+
         stream.getTracks().forEach(track => track.stop())
       }
 
@@ -649,10 +661,13 @@ export default function MessagesPage() {
   }
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && recording) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop()
       setRecording(false)
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current)
+        recordingTimerRef.current = null
+      }
     }
   }
 
@@ -662,11 +677,8 @@ export default function MessagesPage() {
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
-    if (files.length && selectedChat) {
-      const { urls, types } = await uploadMedia(files)
-      for (let i = 0; i < urls.length; i++) {
-        await sendMediaMessage(urls[i], types[i])
-      }
+    if (files.length) {
+      setSelectedMedia(prev => [...prev, ...files])
     }
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -847,7 +859,6 @@ export default function MessagesPage() {
             </div>
           </div>
 
-          {/* Search bar */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
             <input
@@ -1010,16 +1021,15 @@ export default function MessagesPage() {
                   const isOwn = message.user_id === currentUserId
                   const prevMsg = messages[index - 1]
                   const nextMsg = messages[index + 1]
-                  const showAvatar = !isOwn && (!prevMsg || prevMsg.user_id !== message.user_id)
-                  const isGrouped = nextMsg && nextMsg.user_id === message.user_id
                   const isFirst = !prevMsg || prevMsg.user_id !== message.user_id
                   const isLast = !nextMsg || nextMsg.user_id !== message.user_id
 
                   return (
                     <div
                       key={message.id}
-                      className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'} ${isGrouped ? 'mb-0.5' : 'mb-1'}`}
+                      className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'} ${nextMsg?.user_id === message.user_id ? 'mb-0.5' : 'mb-1'}`}
                     >
+                      {/* Avatar (other users only) */}
                       {!isOwn && (
                         <div className="w-7 flex-shrink-0 mb-1">
                           {isLast ? (
@@ -1033,13 +1043,16 @@ export default function MessagesPage() {
                         </div>
                       )}
 
+                      {/* Bubble */}
                       <div className={`max-w-[72%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
+                        {/* Sender name for groups */}
                         {!isOwn && isFirst && selectedChat.type === 'group' && (
                           <span className="text-[11px] text-zinc-400 font-medium mb-1 ml-3">
                             {message.profiles?.display_name}
                           </span>
                         )}
 
+                        {/* Reply reference */}
                         {message.reply_to && (
                           <div className={`mb-1 px-3 py-1.5 rounded-xl text-xs border-l-2 border-blue-500 max-w-full ${isOwn ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800 text-zinc-400'}`}>
                             <span className="font-medium text-blue-400">
@@ -1049,21 +1062,23 @@ export default function MessagesPage() {
                           </div>
                         )}
 
-                        <div className={`relative px-3 py-2 ${
-                          isOwn
-                            ? `bg-blue-500 text-white ${
-                                isFirst && isLast ? 'rounded-2xl rounded-br-md'
-                                : isFirst ? 'rounded-2xl rounded-br-md rounded-br-sm'
-                                : isLast ? 'rounded-2xl rounded-tr-sm rounded-br-md'
-                                : 'rounded-2xl rounded-r-sm'
-                              }`
-                            : `bg-zinc-800 text-white ${
-                                isFirst && isLast ? 'rounded-2xl rounded-bl-md'
-                                : isFirst ? 'rounded-2xl rounded-bl-md rounded-bl-sm'
-                                : isLast ? 'rounded-2xl rounded-tl-sm rounded-bl-md'
-                                : 'rounded-2xl rounded-l-sm'
-                              }`
-                        }`}>
+                        <div
+                          className={`relative px-3 py-2 ${
+                            isOwn
+                              ? `bg-blue-500 text-white ${
+                                  isFirst && isLast ? 'rounded-2xl rounded-br-md'
+                                  : isFirst ? 'rounded-2xl rounded-br-md rounded-br-sm'
+                                  : isLast ? 'rounded-2xl rounded-tr-sm rounded-br-md'
+                                  : 'rounded-2xl rounded-r-sm'
+                                }`
+                              : `bg-zinc-800 text-white ${
+                                  isFirst && isLast ? 'rounded-2xl rounded-bl-md'
+                                  : isFirst ? 'rounded-2xl rounded-bl-md rounded-bl-sm'
+                                  : isLast ? 'rounded-2xl rounded-tl-sm rounded-bl-md'
+                                  : 'rounded-2xl rounded-l-sm'
+                                }`
+                          }`}
+                        >
                           {/* Media */}
                           {message.media_urls?.map((url, i) => (
                             <div key={i} className="mb-1 relative group">
@@ -1085,7 +1100,6 @@ export default function MessagesPage() {
                                     src={url}
                                     className="rounded-xl max-w-full max-h-56 cursor-pointer"
                                     onClick={() => setMediaViewer({ url, type: 'video' })}
-                                    poster="/video-placeholder.png"
                                   />
                                   <button
                                     onClick={() => setMediaViewer({ url, type: 'video' })}
@@ -1119,17 +1133,19 @@ export default function MessagesPage() {
                                     ) : (
                                       <Play className="h-4 w-4 text-black ml-0.5" />
                                     )}
-                                 
                                   </button>
                                   <div className="flex-1 min-w-0">
                                     <div className="h-1 bg-zinc-500 rounded-full">
-                                      <div className={`h-full bg-blue-500 rounded-full ${audioPlaying === url ? 'animate-pulse' : 'w-0'}`} style={{ width: audioPlaying === url ? '100%' : '0%' }} />
+                                      <div
+                                        className={`h-full bg-blue-500 rounded-full ${audioPlaying === url ? 'animate-pulse' : ''}`}
+                                        style={{ width: audioPlaying === url ? '100%' : '0%' }}
+                                      />
                                     </div>
                                     <span className="text-[10px] text-zinc-400 mt-0.5">Voice message</span>
                                   </div>
                                 </div>
                               ) : (
-                                <a href={url} target="_blank" className="flex items-center gap-2 text-blue-300 text-sm">
+                                <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-300 text-sm">
                                   <File className="h-4 w-4 flex-shrink-0" />
                                   <span className="underline truncate">View file</span>
                                 </a>
@@ -1147,12 +1163,14 @@ export default function MessagesPage() {
                             </div>
                           ))}
 
+                          {/* Text */}
                           {message.content && (
                             <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
                               {message.content}
                             </p>
                           )}
 
+                          {/* Timestamp + status */}
                           <div className={`flex items-center gap-1 mt-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
                             <span className={`text-[10px] ${isOwn ? 'text-blue-100/70' : 'text-zinc-500'}`}>
                               {timeAgo(message.created_at)}
@@ -1165,6 +1183,7 @@ export default function MessagesPage() {
                           </div>
                         </div>
 
+                        {/* Reply button */}
                         <button
                           onClick={() => setReplyingTo(message)}
                           className="opacity-0 hover:opacity-100 mt-0.5 px-2 py-0.5 rounded-full text-[10px] text-zinc-500 active:bg-zinc-800 transition-all flex items-center gap-1"
@@ -1214,9 +1233,39 @@ export default function MessagesPage() {
               </div>
             )}
 
+            {/* Media preview */}
+            {selectedMedia.length > 0 && (
+              <div className="flex-shrink-0 bg-zinc-900 border-t border-zinc-800 px-4 py-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {selectedMedia.map((file, i) => (
+                    <div key={i} className="relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 bg-zinc-800">
+                      {file.type.startsWith('image/') ? (
+                        <Image src={URL.createObjectURL(file)} alt="Preview" fill className="object-cover" />
+                      ) : file.type.startsWith('video/') ? (
+                        <div className="w-full h-full flex items-center justify-center bg-zinc-700">
+                          <Video className="h-5 w-5 text-zinc-400" />
+                        </div>
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <File className="h-6 w-6 text-zinc-400" />
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setSelectedMedia(prev => prev.filter((_, idx) => idx !== i))}
+                        className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 rounded-full flex items-center justify-center"
+                      >
+                        <X className="h-3 w-3 text-white" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Input bar */}
             <div className="flex-shrink-0 bg-black border-t border-zinc-800/60 px-3 py-2 pb-safe">
               <div className="flex items-end gap-2">
+                {/* Left actions */}
                 <div className="flex items-center gap-0.5 pb-1 flex-shrink-0">
                   <button className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors">
                     <Smile className="h-[22px] w-[22px] text-zinc-400" />
@@ -1229,6 +1278,7 @@ export default function MessagesPage() {
                   </button>
                 </div>
 
+                {/* Text input */}
                 <div className="flex-1 bg-zinc-800 rounded-3xl px-4 py-2.5 min-h-[42px] flex items-end">
                   <textarea
                     ref={inputRef}
@@ -1245,6 +1295,7 @@ export default function MessagesPage() {
                   />
                 </div>
 
+                {/* Right action — mic or send */}
                 <div className="pb-1 flex-shrink-0">
                   {messageInput.trim() || selectedMedia.length > 0 ? (
                     <button
@@ -1273,6 +1324,7 @@ export default function MessagesPage() {
             </div>
           </>
         ) : (
+          /* Desktop empty state */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
             <div className="w-20 h-20 rounded-full border-2 border-zinc-700 flex items-center justify-center mb-6">
               <MessageCircle className="h-10 w-10 text-zinc-600" />
@@ -1283,7 +1335,7 @@ export default function MessagesPage() {
         )}
       </div>
 
-      {/* Floating Action Buttons - Only visible on chat list */}
+      {/* Floating Action Buttons - Only visible on chat list (mobile) */}
       {!selectedChat && (
         <div className="fixed bottom-24 right-4 z-30 flex flex-col gap-3 md:hidden">
           <button
@@ -1301,7 +1353,7 @@ export default function MessagesPage() {
         </div>
       )}
 
-      {/* Desktop floating buttons (for md screens with chat list visible) */}
+      {/* Floating Action Buttons - Desktop */}
       {!selectedChat && (
         <div className="hidden md:flex fixed bottom-8 right-8 z-30 flex-col gap-3">
           <button
@@ -1409,7 +1461,7 @@ export default function MessagesPage() {
           <div className="px-4 pt-14 pb-2 flex-shrink-0">
             <div className="flex items-center justify-between mb-6">
               <button
-                onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); setSelectedMembers([]) }}
+                onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); setNewGroupMembers([]) }}
                 className="w-8 h-8 flex items-center justify-center rounded-full active:bg-zinc-800"
               >
                 <X className="h-5 w-5 text-white" />
@@ -1417,7 +1469,7 @@ export default function MessagesPage() {
               <span className="text-white text-lg font-bold">New Group</span>
               <button
                 onClick={createGroup}
-                disabled={!newGroupName.trim() || selectedMembers.length === 0 || creatingGroup}
+                disabled={!newGroupName.trim() || newGroupMembers.length === 0 || creatingGroup}
                 className="text-blue-500 font-semibold text-sm disabled:opacity-40 active:text-blue-400"
               >
                 {creatingGroup ? 'Creating...' : 'Create'}
@@ -1448,8 +1500,8 @@ export default function MessagesPage() {
                 className="w-full pl-9 pr-4 py-2.5 text-sm bg-zinc-800 text-white placeholder-zinc-400 rounded-xl focus:outline-none"
               />
             </div>
-            {selectedMembers.length > 0 && (
-              <p className="text-xs text-blue-400 px-1">{selectedMembers.length} member{selectedMembers.length > 1 ? 's' : ''} selected</p>
+            {newGroupMembers.length > 0 && (
+              <p className="text-xs text-blue-400 px-1">{newGroupMembers.length} member{newGroupMembers.length > 1 ? 's' : ''} selected</p>
             )}
           </div>
 
@@ -1466,14 +1518,14 @@ export default function MessagesPage() {
                   <button
                     key={ally.id}
                     onClick={() => {
-                      if (selectedMembers.includes(ally.id)) {
-                        setSelectedMembers(prev => prev.filter(id => id !== ally.id))
+                      if (newGroupMembers.includes(ally.id)) {
+                        setNewGroupMembers(prev => prev.filter(id => id !== ally.id))
                       } else {
-                        setSelectedMembers(prev => [...prev, ally.id])
+                        setNewGroupMembers(prev => [...prev, ally.id])
                       }
                     }}
                     className={`w-full flex items-center gap-3 px-2 py-3 rounded-xl transition-colors ${
-                      selectedMembers.includes(ally.id) ? 'bg-blue-500/10' : 'active:bg-zinc-800'
+                      newGroupMembers.includes(ally.id) ? 'bg-blue-500/10' : 'active:bg-zinc-800'
                     }`}
                   >
                     <Avatar className="h-11 w-11 flex-shrink-0">
@@ -1487,11 +1539,11 @@ export default function MessagesPage() {
                       <p className="text-xs text-zinc-500 truncate">@{ally.username}</p>
                     </div>
                     <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                      selectedMembers.includes(ally.id)
+                      newGroupMembers.includes(ally.id)
                         ? 'bg-blue-500 border-blue-500'
                         : 'border-zinc-600'
                     }`}>
-                      {selectedMembers.includes(ally.id) && <Check className="h-3.5 w-3.5 text-white" />}
+                      {newGroupMembers.includes(ally.id) && <Check className="h-3.5 w-3.5 text-white" />}
                     </div>
                   </button>
                 ))}
@@ -1504,7 +1556,7 @@ export default function MessagesPage() {
       {/* ── GROUP SETTINGS MODAL ── */}
       {showGroupSettingsModal && selectedChat?.type === 'group' && (
         <div className="fixed inset-0 z-50 bg-black flex flex-col animate-in slide-in-from-bottom duration-300">
-          <div className="px-4 pt-14 pb-2 flex-shrink-0">
+          <div className="px-4 pt-14 pb-2 flex-shrink-0 overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <button
                 onClick={() => setShowGroupSettingsModal(false)}
@@ -1585,9 +1637,9 @@ export default function MessagesPage() {
             </div>
 
             {/* Members */}
-            <div>
+            <div className="pb-8">
               <p className="text-sm text-zinc-400 mb-2">Members ({groupMembers.length})</p>
-              <div className="space-y-1 max-h-[40vh] overflow-y-auto">
+              <div className="space-y-1">
                 {groupMembers.map((member) => (
                   <div key={member.user_id} className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-zinc-900">
                     <Avatar className="h-9 w-9 flex-shrink-0">
