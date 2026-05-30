@@ -1,4 +1,4 @@
-// app/dashboard/forges/create/page.tsx (adjust path as needed)
+// app/dashboard/forges/create/page.tsx
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
@@ -6,16 +6,12 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { FORGE_TEMPLATES, ForgeTemplate, getTemplateConfig } from '@/lib/forge-templates'
 import { Button } from '@/components/ui/button'
-import Link from 'next/link'
 import {
   Users, Share2, Code2, GitBranch, Palette, Layout, Database,
-  Globe, Terminal, Sparkles, ChevronLeft, CheckCircle, Info, Zap,
-  MessageCircle, Eye, Upload, FileArchive, X, Loader2, Play,
+  Globe, Terminal, Sparkles, ChevronLeft, CheckCircle, Zap,
+  MessageCircle, Upload, FileArchive, X, Loader2,
   Smartphone, Monitor
 } from 'lucide-react'
-import DashboardHeader from '@/components/dashboard/layout/dashboard-header'
-import StoriesStrip from '@/components/dashboard/layout/stories-strip'
-import StoryViewer from '@/components/dashboard/stories/story-viewer'
 
 const templateIconMap: Record<ForgeTemplate, React.ReactNode> = {
   portfolio: <Palette className="w-6 h-6" />,
@@ -38,10 +34,6 @@ export default function CreateForgePage() {
   const [isPublicPreview, setIsPublicPreview] = useState(false)
   const [creating, setCreating] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
-  const [followedProfiles, setFollowedProfiles] = useState<any[]>([])
-  const [suggestedUsers, setSuggestedUsers] = useState<any[]>([])
-  const [viewingStoryUserId, setViewingStoryUserId] = useState<string | null>(null)
 
   // ZIP Upload state
   const [zipFile, setZipFile] = useState<File | null>(null)
@@ -51,31 +43,18 @@ export default function CreateForgePage() {
   const [showMobilePreview, setShowMobilePreview] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Get current user
   useEffect(() => {
-    const loadUserData = async () => {
+    const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/auth/login'); return }
-      setCurrentUserId(user.id)
-      const { data: myProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-      setCurrentUserProfile(myProfile)
-      const { data: allies } = await supabase.from('allies').select('following_id').eq('follower_id', user.id)
-      const followingIds = (allies || []).map((a: any) => a.following_id)
-      if (followingIds.length > 0) {
-        const { data: fp } = await supabase.from('profiles').select('id, display_name, username, avatar_url').in('id', followingIds)
-        setFollowedProfiles(fp || [])
+      if (!user) {
+        router.push('/auth/login')
+        return
       }
-      const { data: usersList } = await supabase.from('profiles').select('id, display_name, username, avatar_url').neq('id', user.id).limit(12)
-      const suggested = (usersList || []).filter((u: any) => !followingIds.includes(u.id))
-      setSuggestedUsers(suggested)
+      setCurrentUserId(user.id)
     }
-    loadUserData()
+    getUser()
   }, [supabase, router])
-
-  const usersWithSelf: any[] = []
-  const seen = new Set<string>()
-  if (currentUserProfile) { usersWithSelf.push(currentUserProfile); seen.add(currentUserProfile.id) }
-  followedProfiles.forEach(p => { if (!seen.has(p.id)) { usersWithSelf.push(p); seen.add(p.id) } })
-  suggestedUsers.forEach(u => { if (!seen.has(u.id)) { usersWithSelf.push(u); seen.add(u.id) } })
 
   const handleZipSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -98,7 +77,7 @@ export default function CreateForgePage() {
       const templateConfig = getTemplateConfig(selectedTemplate)
       const previewToken = isPublicPreview ? `preview_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` : null
 
-      // Step 1: Create the forge
+      // Create the forge
       const response = await fetch('/api/forges', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -115,7 +94,7 @@ export default function CreateForgePage() {
       if (!response.ok) throw new Error('Failed to create forge')
       const forge = await response.json()
 
-      // Step 2: Add owner as contributor if collaborative
+      // Add owner as contributor if collaborative
       if (isCollaborative && forge?.id) {
         await fetch('/api/forges/contributors', {
           method: 'POST',
@@ -129,7 +108,7 @@ export default function CreateForgePage() {
         })
       }
 
-      // Step 3: Upload ZIP if provided
+      // Upload ZIP if provided
       if (zipFile && forge?.id) {
         setUploading(true)
         const formData = new FormData()
@@ -158,11 +137,8 @@ export default function CreateForgePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <DashboardHeader activeTab="forYou" onTabChange={() => {}} userId={currentUserId || undefined} />
-      <StoriesStrip users={usersWithSelf} currentUserId={currentUserId} onOpenStory={setViewingStoryUserId} />
-
-      <div className="max-w-6xl mx-auto px-4 py-4 md:py-8 pb-24 md:pb-12">
+    <div className="min-h-[100dvh] bg-gray-50">
+      <div className="max-w-6xl mx-auto px-4 py-4 md:py-8 pb-6 md:pb-8">
         {/* Mobile back button */}
         <button onClick={() => router.back()} className="md:hidden flex items-center gap-1 text-gray-600 mb-4">
           <ChevronLeft className="w-5 h-5" />
@@ -175,7 +151,6 @@ export default function CreateForgePage() {
               <Sparkles className="w-5 h-5 text-purple-600" />
               Select a Template
             </h2>
-            {/* Mobile: 2-column grid, Desktop: 3-column */}
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
               {Object.entries(FORGE_TEMPLATES).map(([key, config]) => (
                 <button
@@ -198,7 +173,6 @@ export default function CreateForgePage() {
           </>
         ) : (
           <>
-            {/* Back button */}
             <button
               onClick={() => setSelectedTemplate(null)}
               className="inline-flex items-center gap-1 text-purple-600 hover:text-purple-800 mb-4 md:mb-6 text-sm font-semibold transition-colors"
@@ -207,7 +181,6 @@ export default function CreateForgePage() {
               Back to Templates
             </button>
 
-            {/* Mobile: single column, Desktop: 2-column + sidebar */}
             <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4 md:gap-8">
               {/* Main form */}
               <div className="lg:col-span-2 space-y-4 md:space-y-6 order-2 lg:order-1">
@@ -268,13 +241,7 @@ export default function CreateForgePage() {
                       <Upload className="w-8 h-8 md:w-10 md:h-10 text-gray-400 mx-auto mb-3" />
                       <p className="text-sm md:text-base text-gray-600 font-medium">Tap to select a .zip file</p>
                       <p className="text-xs text-gray-400 mt-1">HTML, CSS, JS projects supported</p>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".zip"
-                        onChange={handleZipSelect}
-                        className="hidden"
-                      />
+                      <input ref={fileInputRef} type="file" accept=".zip" onChange={handleZipSelect} className="hidden" />
                     </div>
                   ) : (
                     <div className="bg-purple-50 rounded-xl p-4 flex items-center gap-3">
@@ -283,10 +250,7 @@ export default function CreateForgePage() {
                         <p className="text-sm font-semibold text-gray-900 truncate">{zipFile.name}</p>
                         <p className="text-xs text-gray-500">{(zipFile.size / 1024).toFixed(1)} KB</p>
                       </div>
-                      <button
-                        onClick={() => { setZipFile(null); setPreviewUrl(null) }}
-                        className="p-1.5 rounded-full hover:bg-purple-100 transition-colors"
-                      >
+                      <button onClick={() => { setZipFile(null); setPreviewUrl(null) }} className="p-1.5 rounded-full hover:bg-purple-100 transition-colors">
                         <X className="w-5 h-5 text-gray-500" />
                       </button>
                     </div>
@@ -307,7 +271,6 @@ export default function CreateForgePage() {
                     </div>
                   )}
 
-                  {/* Mobile Preview Toggle */}
                   {previewUrl && (
                     <div className="mt-4">
                       <button
@@ -320,7 +283,6 @@ export default function CreateForgePage() {
                       
                       {showMobilePreview && (
                         <div className="mt-3 rounded-xl overflow-hidden border-2 border-gray-300 shadow-lg mx-auto" style={{ maxWidth: 375 }}>
-                          {/* Mobile frame top bar */}
                           <div className="bg-gray-800 px-3 py-2 flex items-center gap-2">
                             <div className="flex gap-1">
                               <div className="w-2 h-2 rounded-full bg-red-500" />
@@ -329,12 +291,7 @@ export default function CreateForgePage() {
                             </div>
                             <span className="text-[10px] text-gray-400 mx-auto">Preview</span>
                           </div>
-                          <iframe
-                            src={previewUrl}
-                            className="w-full bg-white"
-                            style={{ height: 500 }}
-                            title="Mobile Preview"
-                          />
+                          <iframe src={previewUrl} className="w-full bg-white" style={{ height: 500 }} title="Mobile Preview" />
                         </div>
                       )}
                     </div>
@@ -342,7 +299,7 @@ export default function CreateForgePage() {
                 </div>
               </div>
 
-              {/* Sidebar - Mobile: above form, Desktop: sidebar */}
+              {/* Sidebar */}
               <div className="space-y-3 md:space-y-5 order-1 lg:order-2">
                 {/* Collaborative Toggle */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm active:bg-gray-50 transition-colors">
@@ -358,9 +315,7 @@ export default function CreateForgePage() {
                         <Users className="w-4 h-4 text-purple-600" />
                         Collaborative
                       </div>
-                      <p className="text-xs md:text-sm text-gray-600 mt-1">
-                        Invite teammates and use approval workflows.
-                      </p>
+                      <p className="text-xs md:text-sm text-gray-600 mt-1">Invite teammates and use approval workflows.</p>
                     </div>
                   </label>
                   {isCollaborative && (
@@ -385,14 +340,12 @@ export default function CreateForgePage() {
                         <Share2 className="w-4 h-4 text-purple-600" />
                         Public Preview Link
                       </div>
-                      <p className="text-xs md:text-sm text-gray-600 mt-1">
-                        Generate a shareable preview link.
-                      </p>
+                      <p className="text-xs md:text-sm text-gray-600 mt-1">Generate a shareable preview link.</p>
                     </div>
                   </label>
                 </div>
 
-                {/* Create Button - Mobile sticky */}
+                {/* Desktop Create Button */}
                 <div className="hidden lg:block">
                   <Button
                     onClick={handleCreate}
@@ -434,7 +387,7 @@ export default function CreateForgePage() {
             </div>
 
             {/* Mobile Sticky Create Button */}
-            <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/95 backdrop-blur-lg border-t border-gray-200 lg:hidden z-30 pb-safe">
+            <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/95 backdrop-blur-lg border-t border-gray-200 lg:hidden z-30">
               <Button
                 onClick={handleCreate}
                 disabled={creating || !forgeName.trim() || uploading}
@@ -453,10 +406,6 @@ export default function CreateForgePage() {
           </>
         )}
       </div>
-
-      {viewingStoryUserId && (
-        <StoryViewer userId={viewingStoryUserId} onClose={() => setViewingStoryUserId(null)} />
-      )}
     </div>
   )
 }
