@@ -6,13 +6,15 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { timeAgo } from '@/lib/dashboard/helpers'
-import { 
-  Loader2, MessageCircle, Search, ArrowLeft, 
-  Users, UserPlus, Send, Check, X, MoreVertical,
+import {
+  Loader2, MessageCircle, Search, ArrowLeft,
+  Users, Send, Check, X, MoreVertical,
   Phone, Video, Info, Smile, Paperclip, Mic,
-  CheckCheck, Clock, ArrowRight, Plus, Camera,
-  Music, File, Trash2, Edit2, Copy, Reply,
-  Volume2, FolderPlus, AtSign, Link2
+  CheckCheck, Clock, Reply, Plus, Camera,
+  Music, File, Edit2, Image as ImageIcon,
+  Download, Trash2, ExternalLink, Crown,
+  Shield, UserMinus, Pencil, CameraIcon,
+  Megaphone, Volume2, VolumeX, Play, Pause
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -31,11 +33,18 @@ interface Group {
   name: string
   description: string
   avatar_url: string | null
+  cover_url: string | null
   created_by: string
   is_private: boolean
   invite_code: string
   member_count: number
   created_at: string
+}
+
+interface GroupMember {
+  user_id: string
+  role: 'admin' | 'member'
+  profiles: Profile
 }
 
 interface ChatItem {
@@ -79,11 +88,10 @@ interface Message {
 export default function MessagesPage() {
   const router = useRouter()
   const supabase = createClient()
-  
+
   // State
   const [chats, setChats] = useState<ChatItem[]>([])
   const [allies, setAllies] = useState<Profile[]>([])
-  const [groups, setGroups] = useState<Group[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingAllies, setLoadingAllies] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -91,31 +99,43 @@ export default function MessagesPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [messageInput, setMessageInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [showNewChat, setShowNewChat] = useState(false)
-  const [showNewGroup, setShowNewGroup] = useState(false)
+  const [showNewChatModal, setShowNewChatModal] = useState(false)
+  const [showNewGroupModal, setShowNewGroupModal] = useState(false)
+  const [showGroupSettingsModal, setShowGroupSettingsModal] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [currentUserProfile, setCurrentUserProfile] = useState<any>(null)
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [recording, setRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [selectedMedia, setSelectedMedia] = useState<File[]>([])
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  
+  const [mediaViewer, setMediaViewer] = useState<{ url: string; type: string } | null>(null)
+  const [audioPlaying, setAudioPlaying] = useState<string | null>(null)
+
   // New group state
   const [newGroupName, setNewGroupName] = useState('')
   const [selectedMembers, setSelectedMembers] = useState<string[]>([])
   const [creatingGroup, setCreatingGroup] = useState(false)
-  
+
+  // Group settings state
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([])
+  const [groupDescription, setGroupDescription] = useState('')
+  const [isCurrentUserAdmin, setIsCurrentUserAdmin] = useState(false)
+  const [uploadingGroupAvatar, setUploadingGroupAvatar] = useState(false)
+  const [uploadingGroupCover, setUploadingGroupCover] = useState(false)
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const groupAvatarInputRef = useRef<HTMLInputElement>(null)
+  const groupCoverInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const sentMessageIds = useRef<Set<string>>(new Set())
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   // Get current user
   useEffect(() => {
@@ -126,7 +146,7 @@ export default function MessagesPage() {
         return
       }
       setCurrentUserId(user.id)
-      
+
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
@@ -142,11 +162,10 @@ export default function MessagesPage() {
     if (currentUserId) {
       fetchChats()
       fetchAllies()
-      fetchGroups()
     }
   }, [currentUserId])
 
-  // Set up real-time subscription
+  // Real-time subscription
   useEffect(() => {
     if (!currentUserId) return
 
@@ -157,7 +176,7 @@ export default function MessagesPage() {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         async (payload) => {
           if (sentMessageIds.current.has(payload.new.id)) return
-          
+
           const { data: newMessage } = await supabase
             .from('messages')
             .select(`
@@ -174,7 +193,7 @@ export default function MessagesPage() {
             `)
             .eq('id', payload.new.id)
             .single()
-          
+
           if (newMessage) {
             setMessages(prev => {
               const exists = prev.some(m => m.id === newMessage.id)
@@ -204,7 +223,11 @@ export default function MessagesPage() {
     if (selectedChat) {
       fetchMessages(selectedChat)
       markChatAsRead(selectedChat.id)
-      setIsMobileMenuOpen(false)
+      // Check admin status for groups
+      if (selectedChat.type === 'group') {
+        checkAdminStatus(selectedChat.id)
+        fetchGroupMembers(selectedChat.id)
+      }
     }
   }, [selectedChat])
 
@@ -218,7 +241,7 @@ export default function MessagesPage() {
         .eq('user_id', currentUserId)
 
       const directChats: ChatItem[] = []
-      
+
       if (participants?.length) {
         for (const p of participants) {
           const { data: conv } = await supabase
@@ -226,30 +249,30 @@ export default function MessagesPage() {
             .select('*, messages(*)')
             .eq('id', p.conversation_id)
             .single()
-          
+
           if (conv) {
             const { data: otherParticipants } = await supabase
               .from('conversation_participants')
               .select('user_id')
               .eq('conversation_id', conv.id)
               .neq('user_id', currentUserId)
-            
+
             if (otherParticipants?.length) {
               const { data: otherUser } = await supabase
                 .from('profiles')
                 .select('*')
                 .eq('id', otherParticipants[0].user_id)
                 .single()
-              
+
               if (otherUser) {
                 const messages = conv.messages || []
-                const lastMessage = messages.sort((a: any, b: any) => 
+                const lastMessage = messages.sort((a: any, b: any) =>
                   new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                 )[0]
-                const unreadCount = messages.filter((m: any) => 
+                const unreadCount = messages.filter((m: any) =>
                   m.user_id !== currentUserId && !m.is_read
                 ).length
-                
+
                 directChats.push({
                   id: conv.id,
                   type: 'direct',
@@ -271,12 +294,12 @@ export default function MessagesPage() {
           }
         }
       }
-      
+
       const { data: groupMemberships } = await supabase
         .from('group_members')
         .select('group_id, groups(*)')
         .eq('user_id', currentUserId)
-      
+
       const groupChats: ChatItem[] = (groupMemberships || []).map((gm: any) => ({
         id: gm.group_id,
         type: 'group',
@@ -287,11 +310,11 @@ export default function MessagesPage() {
         unread_count: 0,
         updated_at: gm.groups.updated_at
       }))
-      
-      const allChats = [...directChats, ...groupChats].sort((a, b) => 
+
+      const allChats = [...directChats, ...groupChats].sort((a, b) =>
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
       )
-      
+
       setChats(allChats)
     } catch (error) {
       console.error('Failed to fetch chats:', error)
@@ -332,19 +355,6 @@ export default function MessagesPage() {
     }
   }
 
-  const fetchGroups = async () => {
-    if (!currentUserId) return
-    try {
-      const { data } = await supabase
-        .from('group_members')
-        .select('groups(*)')
-        .eq('user_id', currentUserId)
-      setGroups((data || []).map((d: any) => d.groups))
-    } catch (error) {
-      console.error('Failed to fetch groups:', error)
-    }
-  }
-
   const fetchMessages = async (chat: ChatItem) => {
     try {
       let query = supabase
@@ -363,17 +373,17 @@ export default function MessagesPage() {
         `)
         .order('created_at', { ascending: true })
         .limit(100)
-      
+
       if (chat.type === 'direct') {
         query = query.eq('conversation_id', chat.id)
       } else {
         query = query.eq('group_id', chat.id)
       }
-      
+
       const { data, error } = await query
       if (error) throw error
       setMessages(data || [])
-      
+
       if (data?.length) {
         await supabase
           .from('messages')
@@ -387,8 +397,33 @@ export default function MessagesPage() {
     }
   }
 
+  const checkAdminStatus = async (groupId: string) => {
+    const { data } = await supabase
+      .from('group_members')
+      .select('role')
+      .eq('group_id', groupId)
+      .eq('user_id', currentUserId)
+      .single()
+    setIsCurrentUserAdmin(data?.role === 'admin')
+  }
+
+  const fetchGroupMembers = async (groupId: string) => {
+    const { data } = await supabase
+      .from('group_members')
+      .select('user_id, role, profiles(*)')
+      .eq('group_id', groupId)
+    setGroupMembers(data || [])
+    // Update group description
+    const { data: groupData } = await supabase
+      .from('groups')
+      .select('description')
+      .eq('id', groupId)
+      .single()
+    setGroupDescription(groupData?.description || '')
+  }
+
   const markChatAsRead = (chatId: string) => {
-    setChats(prev => prev.map(c => 
+    setChats(prev => prev.map(c =>
       c.id === chatId ? { ...c, unread_count: 0 } : c
     ))
   }
@@ -402,7 +437,7 @@ export default function MessagesPage() {
         .eq('user_id', currentUserId)
 
       const convIds = existing?.map(p => p.conversation_id) || []
-      
+
       if (convIds.length) {
         const { data: match } = await supabase
           .from('conversation_participants')
@@ -410,16 +445,16 @@ export default function MessagesPage() {
           .eq('user_id', otherUserId)
           .in('conversation_id', convIds)
           .maybeSingle()
-        
+
         if (match) return match.conversation_id
       }
-      
+
       const { data: conversation } = await supabase
         .from('conversations')
         .insert({ type: 'direct', updated_at: new Date().toISOString() })
         .select()
         .single()
-      
+
       if (conversation) {
         await supabase.from('conversation_participants').insert([
           { conversation_id: conversation.id, user_id: currentUserId },
@@ -435,11 +470,11 @@ export default function MessagesPage() {
 
   const createGroup = async () => {
     if (!currentUserId || !newGroupName.trim() || selectedMembers.length === 0) return
-    
+
     setCreatingGroup(true)
     try {
       const inviteCode = Math.random().toString(36).substring(2, 10).toUpperCase()
-      
+
       const { data: group, error: groupError } = await supabase
         .from('groups')
         .insert({
@@ -450,22 +485,22 @@ export default function MessagesPage() {
         })
         .select()
         .single()
-      
+
       if (groupError) throw groupError
-      
+
       const members = [...selectedMembers, currentUserId].map(userId => ({
         group_id: group.id,
         user_id: userId,
         role: userId === currentUserId ? 'admin' : 'member'
       }))
-      
+
       const { error: membersError } = await supabase
         .from('group_members')
         .insert(members)
-      
+
       if (membersError) throw membersError
-      
-      setShowNewGroup(false)
+
+      setShowNewGroupModal(false)
       setNewGroupName('')
       setSelectedMembers([])
       await fetchChats()
@@ -477,28 +512,106 @@ export default function MessagesPage() {
     }
   }
 
+  const updateGroupAvatar = async (file: File) => {
+    if (!selectedChat?.id) return
+    setUploadingGroupAvatar(true)
+    try {
+      const fileName = `group-avatars/${selectedChat.id}/${Date.now()}.${file.name.split('.').pop()}`
+      const { error: uploadError } = await supabase.storage.from('chat_media').upload(fileName, file)
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(fileName)
+
+      await supabase.from('groups').update({ avatar_url: publicUrl }).eq('id', selectedChat.id)
+      fetchChats()
+      setSelectedChat(prev => prev ? { ...prev, avatar_url: publicUrl } : null)
+    } catch (error) {
+      console.error('Failed to update avatar:', error)
+    } finally {
+      setUploadingGroupAvatar(false)
+    }
+  }
+
+  const updateGroupCover = async (file: File) => {
+    if (!selectedChat?.id) return
+    setUploadingGroupCover(true)
+    try {
+      const fileName = `group-covers/${selectedChat.id}/${Date.now()}.${file.name.split('.').pop()}`
+      const { error: uploadError } = await supabase.storage.from('chat_media').upload(fileName, file)
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(fileName)
+
+      await supabase.from('groups').update({ cover_url: publicUrl }).eq('id', selectedChat.id)
+      fetchChats()
+    } catch (error) {
+      console.error('Failed to update cover:', error)
+    } finally {
+      setUploadingGroupCover(false)
+    }
+  }
+
+  const updateGroupDescription = async () => {
+    if (!selectedChat?.id) return
+    try {
+      await supabase.from('groups').update({ description: groupDescription }).eq('id', selectedChat.id)
+      alert('Group description updated!')
+    } catch (error) {
+      console.error('Failed to update description:', error)
+    }
+  }
+
+  const removeMember = async (userId: string) => {
+    if (!selectedChat?.id || !isCurrentUserAdmin) return
+    if (!confirm('Remove this member?')) return
+    try {
+      await supabase.from('group_members').delete().eq('group_id', selectedChat.id).eq('user_id', userId)
+      fetchGroupMembers(selectedChat.id)
+      fetchChats()
+    } catch (error) {
+      console.error('Failed to remove member:', error)
+    }
+  }
+
   const uploadMedia = async (files: File[]): Promise<{ urls: string[], types: string[] }> => {
     const urls: string[] = []
     const types: string[] = []
-    
+
     for (const file of files) {
       const fileExt = file.name.split('.').pop()
       const fileName = `${currentUserId}/${Date.now()}_${Math.random()}.${fileExt}`
-      
+
       const { error: uploadError } = await supabase.storage
         .from('chat_media')
         .upload(fileName, file)
-      
+
       if (!uploadError) {
         const { data: { publicUrl } } = supabase.storage
           .from('chat_media')
           .getPublicUrl(fileName)
         urls.push(publicUrl)
-        types.push(file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'file')
+        types.push(file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'file')
       }
     }
-    
+
     return { urls, types }
+  }
+
+  const downloadMedia = async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url)
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+    } catch (error) {
+      window.open(url, '_blank')
+    }
   }
 
   const startRecording = async () => {
@@ -507,11 +620,11 @@ export default function MessagesPage() {
       const mediaRecorder = new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       audioChunksRef.current = []
-      
+
       mediaRecorder.ondataavailable = (event) => {
         audioChunksRef.current.push(event.data)
       }
-      
+
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
         const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' })
@@ -521,7 +634,7 @@ export default function MessagesPage() {
         }
         stream.getTracks().forEach(track => track.stop())
       }
-      
+
       mediaRecorder.start()
       setRecording(true)
       setRecordingTime(0)
@@ -559,7 +672,7 @@ export default function MessagesPage() {
 
   const sendMediaMessage = async (mediaUrl: string, mediaType: string) => {
     if (!selectedChat || !currentUserId) return
-    
+
     setSending(true)
     try {
       const messageData: any = {
@@ -569,25 +682,25 @@ export default function MessagesPage() {
         media_types: [mediaType],
         is_read: false
       }
-      
+
       if (selectedChat.type === 'direct') {
         messageData.conversation_id = selectedChat.id
       } else {
         messageData.group_id = selectedChat.id
       }
-      
+
       if (replyingTo) {
         messageData.reply_to_id = replyingTo.id
       }
-      
+
       const { data, error } = await supabase
         .from('messages')
         .insert(messageData)
         .select()
         .single()
-      
+
       if (error) throw error
-      
+
       sentMessageIds.current.add(data.id)
       setReplyingTo(null)
       fetchChats()
@@ -600,23 +713,23 @@ export default function MessagesPage() {
 
   const sendMessage = async () => {
     if ((!messageInput.trim() && selectedMedia.length === 0) || !selectedChat || !currentUserId || sending) return
-    
+
     setSending(true)
     const tempId = `temp-${Date.now()}`
     const messageContent = messageInput.trim()
-    
+
     setMessageInput('')
-    
+
     let mediaUrls: string[] = []
     let mediaTypes: string[] = []
-    
+
     if (selectedMedia.length) {
       const result = await uploadMedia(selectedMedia)
       mediaUrls = result.urls
       mediaTypes = result.types
       setSelectedMedia([])
     }
-    
+
     const optimisticMessage: Message = {
       id: tempId,
       conversation_id: selectedChat.type === 'direct' ? selectedChat.id : undefined,
@@ -634,9 +747,9 @@ export default function MessagesPage() {
         avatar_url: currentUserProfile?.avatar_url,
       }
     }
-    
+
     setMessages(prev => [...prev, optimisticMessage])
-    
+
     try {
       const messageData: any = {
         user_id: currentUserId,
@@ -645,17 +758,17 @@ export default function MessagesPage() {
         media_types: mediaTypes,
         is_read: false
       }
-      
+
       if (selectedChat.type === 'direct') {
         messageData.conversation_id = selectedChat.id
       } else {
         messageData.group_id = selectedChat.id
       }
-      
+
       if (replyingTo) {
         messageData.reply_to_id = replyingTo.id
       }
-      
+
       const { data, error } = await supabase
         .from('messages')
         .insert(messageData)
@@ -674,7 +787,7 @@ export default function MessagesPage() {
         .single()
 
       if (error) throw error
-      
+
       sentMessageIds.current.add(data.id)
       setMessages(prev => prev.map(m => m.id === tempId ? data : m))
       setReplyingTo(null)
@@ -714,16 +827,9 @@ export default function MessagesPage() {
   if (!currentUserId) return null
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-black overflow-hidden">
-
-      {/* ── CHAT LIST VIEW (mobile: full screen, desktop: left panel) ── */}
-      <div className={`
-        flex flex-col bg-black
-        ${selectedChat ? 'hidden md:flex md:w-[360px] md:border-r md:border-zinc-800' : 'flex flex-1'}
-        md:flex md:w-[360px] md:flex-shrink-0 md:border-r md:border-zinc-800
-        absolute md:relative inset-0 z-10 md:z-auto
-      `}>
-
+    <div className="h-[100dvh] flex flex-col bg-black overflow-hidden relative">
+      {/* ── CHAT LIST ── */}
+      <div className={`flex flex-col bg-black h-full ${selectedChat ? 'hidden md:flex md:w-[380px] md:flex-shrink-0 md:border-r md:border-zinc-800' : 'flex flex-1'}`}>
         {/* Header */}
         <div className="px-4 pt-14 pb-2 bg-black flex-shrink-0">
           <div className="flex items-center justify-between mb-4">
@@ -738,20 +844,6 @@ export default function MessagesPage() {
                 {currentUserProfile?.username || 'Messages'}
               </span>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setShowNewGroup(true)}
-                className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
-              >
-                <FolderPlus className="h-[22px] w-[22px] text-white" />
-              </button>
-              <button
-                onClick={() => setShowNewChat(!showNewChat)}
-                className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
-              >
-                <Edit2 className="h-[22px] w-[22px] text-white" />
-              </button>
-            </div>
           </div>
 
           {/* Search bar */}
@@ -762,140 +854,10 @@ export default function MessagesPage() {
               placeholder="Search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm bg-zinc-800 text-white placeholder-zinc-400 rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-600 transition"
+              className="w-full pl-9 pr-4 py-2.5 text-sm bg-zinc-800 text-white placeholder-zinc-400 rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-600 transition"
             />
           </div>
         </div>
-
-        {/* New Chat / New Group Panel */}
-        {(showNewChat || showNewGroup) && (
-          <div className="border-b border-zinc-800 max-h-[45vh] overflow-y-auto flex-shrink-0 bg-zinc-950">
-            <div className="px-4 py-3">
-              {showNewGroup ? (
-                <>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-semibold text-zinc-300">New Group</span>
-                    <button onClick={() => { setShowNewGroup(false); setSelectedMembers([]); setNewGroupName('') }}
-                      className="w-7 h-7 flex items-center justify-center rounded-full bg-zinc-700 active:bg-zinc-600">
-                      <X className="h-3.5 w-3.5 text-white" />
-                    </button>
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="Group name"
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    className="w-full px-4 py-2.5 text-sm bg-zinc-800 text-white placeholder-zinc-500 rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-500 mb-3"
-                  />
-                  <p className="text-xs text-zinc-500 mb-2 px-1">Add people · {selectedMembers.length} selected</p>
-                  <div className="space-y-0.5">
-                    {allies.map((ally) => (
-                      <button
-                        key={ally.id}
-                        onClick={() => {
-                          if (selectedMembers.includes(ally.id)) {
-                            setSelectedMembers(prev => prev.filter(id => id !== ally.id))
-                          } else {
-                            setSelectedMembers(prev => [...prev, ally.id])
-                          }
-                        }}
-                        className={`w-full flex items-center gap-3 px-2 py-2.5 rounded-xl transition-colors ${
-                          selectedMembers.includes(ally.id) ? 'bg-zinc-800' : 'active:bg-zinc-800'
-                        }`}
-                      >
-                        <Avatar className="h-10 w-10 flex-shrink-0">
-                          {ally.avatar_url && <AvatarImage src={ally.avatar_url} />}
-                          <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-sm font-bold">
-                            {ally.display_name?.[0]?.toUpperCase() || '?'}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1 text-left min-w-0">
-                          <p className="text-sm font-medium text-white truncate">{ally.display_name}</p>
-                          <p className="text-xs text-zinc-500 truncate">@{ally.username}</p>
-                        </div>
-                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                          selectedMembers.includes(ally.id)
-                            ? 'bg-blue-500 border-blue-500'
-                            : 'border-zinc-600'
-                        }`}>
-                          {selectedMembers.includes(ally.id) && <Check className="h-3 w-3 text-white" />}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={createGroup}
-                    disabled={!newGroupName.trim() || selectedMembers.length === 0 || creatingGroup}
-                    className="w-full mt-3 py-2.5 bg-blue-500 text-white rounded-full text-sm font-semibold disabled:opacity-40 active:bg-blue-600 transition-colors"
-                  >
-                    {creatingGroup ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : 'Create Group'}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-semibold text-zinc-300">New Message</span>
-                    <button onClick={() => setShowNewChat(false)}
-                      className="w-7 h-7 flex items-center justify-center rounded-full bg-zinc-700 active:bg-zinc-600">
-                      <X className="h-3.5 w-3.5 text-white" />
-                    </button>
-                  </div>
-                  {loadingAllies ? (
-                    <div className="flex justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
-                    </div>
-                  ) : filteredAllies.length === 0 ? (
-                    <p className="text-sm text-zinc-500 text-center py-8">No contacts found</p>
-                  ) : (
-                    <div className="space-y-0.5">
-                      {filteredAllies.map((ally) => {
-                        const existingConv = chats.find(c => c.type === 'direct' && c.other_user?.id === ally.id)
-                        return (
-                          <button
-                            key={ally.id}
-                            onClick={() => {
-                              if (existingConv) {
-                                setSelectedChat(existingConv)
-                                setShowNewChat(false)
-                              } else {
-                                getOrCreateConversation(ally.id).then(convId => {
-                                  if (convId) fetchChats()
-                                  setSelectedChat({
-                                    id: convId!,
-                                    type: 'direct',
-                                    name: ally.display_name,
-                                    avatar_url: ally.avatar_url,
-                                    other_user: ally,
-                                    last_message: null,
-                                    unread_count: 0,
-                                    updated_at: new Date().toISOString()
-                                  })
-                                  setShowNewChat(false)
-                                })
-                              }
-                            }}
-                            className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl active:bg-zinc-800 transition-colors"
-                          >
-                            <Avatar className="h-11 w-11 flex-shrink-0">
-                              {ally.avatar_url && <AvatarImage src={ally.avatar_url} />}
-                              <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-sm font-bold">
-                                {ally.display_name?.[0]?.toUpperCase() || '?'}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="flex-1 text-left min-w-0">
-                              <p className="text-sm font-semibold text-white truncate">{ally.display_name}</p>
-                              <p className="text-xs text-zinc-500 truncate">@{ally.username}</p>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto">
@@ -916,17 +878,11 @@ export default function MessagesPage() {
               {filteredChats.map((chat) => (
                 <button
                   key={chat.id}
-                  onClick={() => {
-                    setSelectedChat(chat)
-                    setIsMobileMenuOpen(false)
-                    setShowNewChat(false)
-                    setShowNewGroup(false)
-                  }}
+                  onClick={() => setSelectedChat(chat)}
                   className={`w-full flex items-center gap-3 px-4 py-3 transition-colors active:bg-zinc-900 ${
                     selectedChat?.id === chat.id ? 'bg-zinc-900' : ''
                   }`}
                 >
-                  {/* Avatar with story-ring style for unread */}
                   <div className={`relative flex-shrink-0 ${chat.unread_count > 0 ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-black rounded-full' : ''}`}>
                     <Avatar className="h-14 w-14">
                       {chat.avatar_url && <AvatarImage src={chat.avatar_url} />}
@@ -974,18 +930,14 @@ export default function MessagesPage() {
       </div>
 
       {/* ── CHAT VIEW ── */}
-      <div className={`
-        flex-1 flex flex-col bg-black
-        ${!selectedChat ? 'hidden md:flex' : 'flex'}
-        absolute md:relative inset-0 md:inset-auto z-20 md:z-auto
-      `}>
+      <div className={`flex-1 flex flex-col bg-black ${!selectedChat ? 'hidden md:flex' : 'flex absolute md:relative inset-0 z-20 md:z-auto'}`}>
         {selectedChat ? (
           <>
             {/* Chat Header */}
             <div className="flex-shrink-0 bg-black/95 backdrop-blur-xl border-b border-zinc-800/60 px-3 pt-12 pb-2">
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => { setSelectedChat(null); setIsMobileMenuOpen(true) }}
+                  onClick={() => setSelectedChat(null)}
                   className="md:hidden w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors mr-1"
                 >
                   <ArrowLeft className="h-5 w-5 text-white" />
@@ -1020,9 +972,14 @@ export default function MessagesPage() {
                   <button className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors">
                     <Video className="h-[18px] w-[18px] text-white" />
                   </button>
-                  <button className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors">
-                    <Info className="h-[18px] w-[18px] text-white" />
-                  </button>
+                  {selectedChat.type === 'group' && isCurrentUserAdmin && (
+                    <button
+                      onClick={() => setShowGroupSettingsModal(true)}
+                      className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
+                    >
+                      <MoreVertical className="h-[18px] w-[18px] text-white" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1052,9 +1009,7 @@ export default function MessagesPage() {
                   const isOwn = message.user_id === currentUserId
                   const prevMsg = messages[index - 1]
                   const nextMsg = messages[index + 1]
-                  const showAvatar = !isOwn && (
-                    !prevMsg || prevMsg.user_id !== message.user_id
-                  )
+                  const showAvatar = !isOwn && (!prevMsg || prevMsg.user_id !== message.user_id)
                   const isGrouped = nextMsg && nextMsg.user_id === message.user_id
                   const isFirst = !prevMsg || prevMsg.user_id !== message.user_id
                   const isLast = !nextMsg || nextMsg.user_id !== message.user_id
@@ -1064,7 +1019,6 @@ export default function MessagesPage() {
                       key={message.id}
                       className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'} ${isGrouped ? 'mb-0.5' : 'mb-1'}`}
                     >
-                      {/* Avatar (other users only) */}
                       {!isOwn && (
                         <div className="w-7 flex-shrink-0 mb-1">
                           {isLast ? (
@@ -1078,20 +1032,15 @@ export default function MessagesPage() {
                         </div>
                       )}
 
-                      {/* Bubble */}
                       <div className={`max-w-[72%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
-                        {/* Sender name for groups */}
                         {!isOwn && isFirst && selectedChat.type === 'group' && (
                           <span className="text-[11px] text-zinc-400 font-medium mb-1 ml-3">
                             {message.profiles?.display_name}
                           </span>
                         )}
 
-                        {/* Reply reference */}
                         {message.reply_to && (
-                          <div className={`mb-1 px-3 py-1.5 rounded-xl text-xs border-l-2 border-blue-500 max-w-full ${
-                            isOwn ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800 text-zinc-400'
-                          }`}>
+                          <div className={`mb-1 px-3 py-1.5 rounded-xl text-xs border-l-2 border-blue-500 max-w-full ${isOwn ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800 text-zinc-400'}`}>
                             <span className="font-medium text-blue-400">
                               {message.reply_to.profiles?.display_name}
                             </span>
@@ -1099,54 +1048,109 @@ export default function MessagesPage() {
                           </div>
                         )}
 
-                        <div
-                          className={`relative px-3 py-2 ${
-                            isOwn
-                              ? `bg-blue-500 text-white ${
-                                  isFirst && isLast ? 'rounded-2xl rounded-br-md'
-                                  : isFirst ? 'rounded-2xl rounded-br-md rounded-br-sm'
-                                  : isLast ? 'rounded-2xl rounded-tr-sm rounded-br-md'
-                                  : 'rounded-2xl rounded-r-sm'
-                                }`
-                              : `bg-zinc-800 text-white ${
-                                  isFirst && isLast ? 'rounded-2xl rounded-bl-md'
-                                  : isFirst ? 'rounded-2xl rounded-bl-md rounded-bl-sm'
-                                  : isLast ? 'rounded-2xl rounded-tl-sm rounded-bl-md'
-                                  : 'rounded-2xl rounded-l-sm'
-                                }`
-                          }`}
-                        >
+                        <div className={`relative px-3 py-2 ${
+                          isOwn
+                            ? `bg-blue-500 text-white ${
+                                isFirst && isLast ? 'rounded-2xl rounded-br-md'
+                                : isFirst ? 'rounded-2xl rounded-br-md rounded-br-sm'
+                                : isLast ? 'rounded-2xl rounded-tr-sm rounded-br-md'
+                                : 'rounded-2xl rounded-r-sm'
+                              }`
+                            : `bg-zinc-800 text-white ${
+                                isFirst && isLast ? 'rounded-2xl rounded-bl-md'
+                                : isFirst ? 'rounded-2xl rounded-bl-md rounded-bl-sm'
+                                : isLast ? 'rounded-2xl rounded-tl-sm rounded-bl-md'
+                                : 'rounded-2xl rounded-l-sm'
+                              }`
+                        }`}>
                           {/* Media */}
                           {message.media_urls?.map((url, i) => (
-                            <div key={i} className="mb-1">
+                            <div key={i} className="mb-1 relative group">
                               {message.media_types[i] === 'image' ? (
-                                <Image
-                                  src={url} alt="Image"
-                                  width={220} height={220}
-                                  className="rounded-xl max-w-full object-cover"
-                                  unoptimized
-                                />
+                                <button
+                                  onClick={() => setMediaViewer({ url, type: 'image' })}
+                                  className="block"
+                                >
+                                  <Image
+                                    src={url} alt="Image"
+                                    width={220} height={220}
+                                    className="rounded-xl max-w-full object-cover cursor-pointer"
+                                    unoptimized
+                                  />
+                                </button>
                               ) : message.media_types[i] === 'video' ? (
-                                <video src={url} controls className="rounded-xl max-w-full max-h-56" />
+                                <div className="relative">
+                                  <video
+                                    src={url}
+                                    className="rounded-xl max-w-full max-h-56 cursor-pointer"
+                                    onClick={() => setMediaViewer({ url, type: 'video' })}
+                                    poster="/video-placeholder.png"
+                                  />
+                                  <button
+                                    onClick={() => setMediaViewer({ url, type: 'video' })}
+                                    className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-xl"
+                                  >
+                                    <Play className="h-10 w-10 text-white fill-white" />
+                                  </button>
+                                </div>
                               ) : message.media_types[i] === 'audio' ? (
-                                <audio src={url} controls className="w-full max-w-[200px]" />
+                                <div className="flex items-center gap-3 bg-zinc-700/50 rounded-xl px-3 py-2 min-w-[200px]">
+                                  <button
+                                    onClick={() => {
+                                      if (audioPlaying === url) {
+                                        audioRef.current?.pause()
+                                        setAudioPlaying(null)
+                                      } else {
+                                        if (audioRef.current) {
+                                          audioRef.current.pause()
+                                        }
+                                        const audio = new Audio(url)
+                                        audioRef.current = audio
+                                        audio.play()
+                                        setAudioPlaying(url)
+                                        audio.onended = () => setAudioPlaying(null)
+                                      }
+                                    }}
+                                    className="w-8 h-8 rounded-full bg-white flex items-center justify-center flex-shrink-0"
+                                  >
+                                    {audioPlaying === url ? (
+                                      <Pause className="h-4 w-4 text-black" />
+                                    ) : (
+                                      <Play className="h-4 w-4 text-black ml-0.5" />
+                                    )}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="h-1 bg-zinc-500 rounded-full">
+                                      <div className={`h-full bg-blue-500 rounded-full ${audioPlaying === url ? 'animate-pulse' : 'w-0'}`} style={{ width: audioPlaying === url ? '100%' : '0%' }} />
+                                    </div>
+                                    <span className="text-[10px] text-zinc-400 mt-0.5">Voice message</span>
+                                  </div>
+                                </div>
                               ) : (
                                 <a href={url} target="_blank" className="flex items-center gap-2 text-blue-300 text-sm">
                                   <File className="h-4 w-4 flex-shrink-0" />
                                   <span className="underline truncate">View file</span>
                                 </a>
                               )}
+                              {/* Download button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  downloadMedia(url, `media_${Date.now()}`)
+                                }}
+                                className="absolute top-1 right-1 w-7 h-7 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Download className="h-3.5 w-3.5 text-white" />
+                              </button>
                             </div>
                           ))}
 
-                          {/* Text */}
                           {message.content && (
                             <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
                               {message.content}
                             </p>
                           )}
 
-                          {/* Timestamp + status */}
                           <div className={`flex items-center gap-1 mt-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
                             <span className={`text-[10px] ${isOwn ? 'text-blue-100/70' : 'text-zinc-500'}`}>
                               {timeAgo(message.created_at)}
@@ -1159,7 +1163,6 @@ export default function MessagesPage() {
                           </div>
                         </div>
 
-                        {/* Reply button */}
                         <button
                           onClick={() => setReplyingTo(message)}
                           className="opacity-0 hover:opacity-100 mt-0.5 px-2 py-0.5 rounded-full text-[10px] text-zinc-500 active:bg-zinc-800 transition-all flex items-center gap-1"
@@ -1209,40 +1212,11 @@ export default function MessagesPage() {
               </div>
             )}
 
-            {/* Media preview */}
-            {selectedMedia.length > 0 && (
-              <div className="flex-shrink-0 bg-zinc-900 border-t border-zinc-800 px-4 py-2">
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {selectedMedia.map((file, i) => (
-                    <div key={i} className="relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 bg-zinc-800">
-                      {file.type.startsWith('image/') ? (
-                        <Image src={URL.createObjectURL(file)} alt="Preview" fill className="object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <File className="h-6 w-6 text-zinc-400" />
-                        </div>
-                      )}
-                      <button
-                        onClick={() => setSelectedMedia(prev => prev.filter((_, idx) => idx !== i))}
-                        className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 rounded-full flex items-center justify-center"
-                      >
-                        <X className="h-3 w-3 text-white" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Input bar */}
             <div className="flex-shrink-0 bg-black border-t border-zinc-800/60 px-3 py-2 pb-safe">
               <div className="flex items-end gap-2">
-                {/* Left actions */}
                 <div className="flex items-center gap-0.5 pb-1 flex-shrink-0">
-                  <button
-                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
-                  >
+                  <button className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors">
                     <Smile className="h-[22px] w-[22px] text-zinc-400" />
                   </button>
                   <button
@@ -1253,7 +1227,6 @@ export default function MessagesPage() {
                   </button>
                 </div>
 
-                {/* Text input */}
                 <div className="flex-1 bg-zinc-800 rounded-3xl px-4 py-2.5 min-h-[42px] flex items-end">
                   <textarea
                     ref={inputRef}
@@ -1270,7 +1243,6 @@ export default function MessagesPage() {
                   />
                 </div>
 
-                {/* Right action — mic or send */}
                 <div className="pb-1 flex-shrink-0">
                   {messageInput.trim() || selectedMedia.length > 0 ? (
                     <button
@@ -1289,9 +1261,7 @@ export default function MessagesPage() {
                       onMouseUp={stopRecording}
                       onTouchStart={startRecording}
                       onTouchEnd={stopRecording}
-                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${
-                        recording ? 'bg-red-500' : 'active:bg-zinc-800'
-                      }`}
+                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${recording ? 'bg-red-500' : 'active:bg-zinc-800'}`}
                     >
                       <Mic className={`h-[22px] w-[22px] ${recording ? 'text-white' : 'text-zinc-400'}`} />
                     </button>
@@ -1301,30 +1271,411 @@ export default function MessagesPage() {
             </div>
           </>
         ) : (
-          /* Desktop empty state */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
             <div className="w-20 h-20 rounded-full border-2 border-zinc-700 flex items-center justify-center mb-6">
               <MessageCircle className="h-10 w-10 text-zinc-600" />
             </div>
             <h3 className="text-white text-xl font-bold mb-2">Your Messages</h3>
             <p className="text-zinc-500 text-sm max-w-xs">Send private messages to a friend or group</p>
-            <div className="flex gap-3 mt-8">
-              <button
-                onClick={() => setShowNewChat(true)}
-                className="px-6 py-2.5 bg-white text-black font-semibold text-sm rounded-full active:bg-zinc-200 transition-colors"
-              >
-                New Message
-              </button>
-              <button
-                onClick={() => setShowNewGroup(true)}
-                className="px-6 py-2.5 bg-zinc-800 text-white font-semibold text-sm rounded-full active:bg-zinc-700 transition-colors"
-              >
-                New Group
-              </button>
-            </div>
           </div>
         )}
       </div>
+
+      {/* Floating Action Buttons - Only visible on chat list */}
+      {!selectedChat && (
+        <div className="fixed bottom-24 right-4 z-30 flex flex-col gap-3 md:hidden">
+          <button
+            onClick={() => setShowNewGroupModal(true)}
+            className="w-14 h-14 rounded-full bg-zinc-800 shadow-lg flex items-center justify-center active:bg-zinc-700 transition-all border border-zinc-700"
+          >
+            <FolderPlus className="h-6 w-6 text-white" />
+          </button>
+          <button
+            onClick={() => setShowNewChatModal(true)}
+            className="w-14 h-14 rounded-full bg-blue-500 shadow-lg shadow-blue-500/25 flex items-center justify-center active:bg-blue-600 transition-all"
+          >
+            <Plus className="h-7 w-7 text-white" />
+          </button>
+        </div>
+      )}
+
+      {/* Desktop floating buttons (for md screens with chat list visible) */}
+      {!selectedChat && (
+        <div className="hidden md:flex fixed bottom-8 right-8 z-30 flex-col gap-3">
+          <button
+            onClick={() => setShowNewGroupModal(true)}
+            className="w-12 h-12 rounded-full bg-zinc-800 shadow-lg flex items-center justify-center hover:bg-zinc-700 transition-all border border-zinc-700"
+          >
+            <FolderPlus className="h-5 w-5 text-white" />
+          </button>
+          <button
+            onClick={() => setShowNewChatModal(true)}
+            className="w-12 h-12 rounded-full bg-blue-500 shadow-lg shadow-blue-500/25 flex items-center justify-center hover:bg-blue-600 transition-all"
+          >
+            <Plus className="h-6 w-6 text-white" />
+          </button>
+        </div>
+      )}
+
+      {/* ── NEW CHAT MODAL ── */}
+      {showNewChatModal && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col animate-in slide-in-from-bottom duration-300">
+          <div className="px-4 pt-14 pb-2 flex-shrink-0">
+            <div className="flex items-center justify-between mb-4">
+              <button
+                onClick={() => setShowNewChatModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full active:bg-zinc-800"
+              >
+                <X className="h-5 w-5 text-white" />
+              </button>
+              <span className="text-white text-lg font-bold">New Message</span>
+              <div className="w-8" />
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+              <input
+                type="text"
+                placeholder="Search people"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2.5 text-sm bg-zinc-800 text-white placeholder-zinc-400 rounded-xl focus:outline-none"
+                autoFocus
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4">
+            {loadingAllies ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+              </div>
+            ) : filteredAllies.length === 0 ? (
+              <p className="text-sm text-zinc-500 text-center py-8">No contacts found</p>
+            ) : (
+              <div className="space-y-0.5 py-2">
+                {filteredAllies.map((ally) => {
+                  const existingConv = chats.find(c => c.type === 'direct' && c.other_user?.id === ally.id)
+                  return (
+                    <button
+                      key={ally.id}
+                      onClick={() => {
+                        if (existingConv) {
+                          setSelectedChat(existingConv)
+                          setShowNewChatModal(false)
+                        } else {
+                          getOrCreateConversation(ally.id).then(convId => {
+                            if (convId) fetchChats()
+                            setSelectedChat({
+                              id: convId!,
+                              type: 'direct',
+                              name: ally.display_name,
+                              avatar_url: ally.avatar_url,
+                              other_user: ally,
+                              last_message: null,
+                              unread_count: 0,
+                              updated_at: new Date().toISOString()
+                            })
+                            setShowNewChatModal(false)
+                          })
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 px-2 py-3 rounded-xl active:bg-zinc-800 transition-colors"
+                    >
+                      <Avatar className="h-11 w-11 flex-shrink-0">
+                        {ally.avatar_url && <AvatarImage src={ally.avatar_url} />}
+                        <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-sm font-bold">
+                          {ally.display_name?.[0]?.toUpperCase() || '?'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 text-left min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{ally.display_name}</p>
+                        <p className="text-xs text-zinc-500 truncate">@{ally.username}</p>
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-zinc-500 flex-shrink-0" />
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── NEW GROUP MODAL ── */}
+      {showNewGroupModal && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col animate-in slide-in-from-bottom duration-300">
+          <div className="px-4 pt-14 pb-2 flex-shrink-0">
+            <div className="flex items-center justify-between mb-6">
+              <button
+                onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); setSelectedMembers([]) }}
+                className="w-8 h-8 flex items-center justify-center rounded-full active:bg-zinc-800"
+              >
+                <X className="h-5 w-5 text-white" />
+              </button>
+              <span className="text-white text-lg font-bold">New Group</span>
+              <button
+                onClick={createGroup}
+                disabled={!newGroupName.trim() || selectedMembers.length === 0 || creatingGroup}
+                className="text-blue-500 font-semibold text-sm disabled:opacity-40 active:text-blue-400"
+              >
+                {creatingGroup ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center flex-shrink-0">
+                <Camera className="h-5 w-5 text-zinc-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Group name"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                className="flex-1 bg-transparent text-white text-lg placeholder-zinc-500 focus:outline-none"
+                autoFocus
+              />
+            </div>
+
+            <div className="relative mb-2">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+              <input
+                type="text"
+                placeholder="Search people to add"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2.5 text-sm bg-zinc-800 text-white placeholder-zinc-400 rounded-xl focus:outline-none"
+              />
+            </div>
+            {selectedMembers.length > 0 && (
+              <p className="text-xs text-blue-400 px-1">{selectedMembers.length} member{selectedMembers.length > 1 ? 's' : ''} selected</p>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4">
+            {loadingAllies ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+              </div>
+            ) : filteredAllies.length === 0 ? (
+              <p className="text-sm text-zinc-500 text-center py-8">No contacts found</p>
+            ) : (
+              <div className="space-y-0.5 py-2">
+                {filteredAllies.map((ally) => (
+                  <button
+                    key={ally.id}
+                    onClick={() => {
+                      if (selectedMembers.includes(ally.id)) {
+                        setSelectedMembers(prev => prev.filter(id => id !== ally.id))
+                      } else {
+                        setSelectedMembers(prev => [...prev, ally.id])
+                      }
+                    }}
+                    className={`w-full flex items-center gap-3 px-2 py-3 rounded-xl transition-colors ${
+                      selectedMembers.includes(ally.id) ? 'bg-blue-500/10' : 'active:bg-zinc-800'
+                    }`}
+                  >
+                    <Avatar className="h-11 w-11 flex-shrink-0">
+                      {ally.avatar_url && <AvatarImage src={ally.avatar_url} />}
+                      <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-sm font-bold">
+                        {ally.display_name?.[0]?.toUpperCase() || '?'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 text-left min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{ally.display_name}</p>
+                      <p className="text-xs text-zinc-500 truncate">@{ally.username}</p>
+                    </div>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                      selectedMembers.includes(ally.id)
+                        ? 'bg-blue-500 border-blue-500'
+                        : 'border-zinc-600'
+                    }`}>
+                      {selectedMembers.includes(ally.id) && <Check className="h-3.5 w-3.5 text-white" />}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── GROUP SETTINGS MODAL ── */}
+      {showGroupSettingsModal && selectedChat?.type === 'group' && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col animate-in slide-in-from-bottom duration-300">
+          <div className="px-4 pt-14 pb-2 flex-shrink-0">
+            <div className="flex items-center justify-between mb-6">
+              <button
+                onClick={() => setShowGroupSettingsModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full active:bg-zinc-800"
+              >
+                <X className="h-5 w-5 text-white" />
+              </button>
+              <span className="text-white text-lg font-bold">Group Settings</span>
+              <div className="w-8" />
+            </div>
+
+            {/* Cover Photo */}
+            <div className="relative w-full h-32 bg-zinc-800 rounded-xl overflow-hidden mb-4 group">
+              {selectedChat.group?.cover_url ? (
+                <Image src={selectedChat.group.cover_url} alt="Cover" fill className="object-cover" />
+              ) : null}
+              <button
+                onClick={() => groupCoverInputRef.current?.click()}
+                className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <CameraIcon className="h-6 w-6 text-white" />
+                <span className="text-white text-sm ml-2">Change Cover</span>
+              </button>
+              {uploadingGroupCover && (
+                <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-white" />
+                </div>
+              )}
+            </div>
+
+            {/* Avatar */}
+            <div className="relative -mt-12 ml-4 mb-4">
+              <div className="relative w-20 h-20 rounded-full border-4 border-black overflow-hidden group">
+                <Avatar className="w-full h-full">
+                  {selectedChat.avatar_url && <AvatarImage src={selectedChat.avatar_url} />}
+                  <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-xl font-bold">
+                    {selectedChat.name?.[0]?.toUpperCase() || '?'}
+                  </AvatarFallback>
+                </Avatar>
+                <button
+                  onClick={() => groupAvatarInputRef.current?.click()}
+                  className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <CameraIcon className="h-5 w-5 text-white" />
+                </button>
+                {uploadingGroupAvatar && (
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-white" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Group Name */}
+            <div className="mb-4">
+              <p className="text-sm text-zinc-400 mb-1">Group Name</p>
+              <p className="text-white font-semibold text-lg">{selectedChat.name}</p>
+            </div>
+
+            {/* Description */}
+            <div className="mb-4">
+              <p className="text-sm text-zinc-400 mb-1">About</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={groupDescription}
+                  onChange={(e) => setGroupDescription(e.target.value)}
+                  placeholder="Add a description..."
+                  className="flex-1 bg-zinc-800 text-white px-3 py-2 rounded-xl text-sm focus:outline-none"
+                />
+                <button
+                  onClick={updateGroupDescription}
+                  className="px-3 py-2 bg-blue-500 text-white text-sm rounded-xl active:bg-blue-600"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+
+            {/* Members */}
+            <div>
+              <p className="text-sm text-zinc-400 mb-2">Members ({groupMembers.length})</p>
+              <div className="space-y-1 max-h-[40vh] overflow-y-auto">
+                {groupMembers.map((member) => (
+                  <div key={member.user_id} className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-zinc-900">
+                    <Avatar className="h-9 w-9 flex-shrink-0">
+                      {member.profiles?.avatar_url && <AvatarImage src={member.profiles.avatar_url} />}
+                      <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-xs font-bold">
+                        {member.profiles?.display_name?.[0]?.toUpperCase() || '?'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-white truncate">{member.profiles?.display_name}</p>
+                        {member.role === 'admin' && (
+                          <Crown className="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-xs text-zinc-500">@{member.profiles?.username}</p>
+                    </div>
+                    {isCurrentUserAdmin && member.user_id !== currentUserId && (
+                      <button
+                        onClick={() => removeMember(member.user_id)}
+                        className="w-8 h-8 flex items-center justify-center rounded-full active:bg-zinc-700"
+                      >
+                        <UserMinus className="h-4 w-4 text-red-400" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Hidden inputs for group media */}
+          <input
+            ref={groupAvatarInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) updateGroupAvatar(file)
+              e.target.value = ''
+            }}
+            className="hidden"
+          />
+          <input
+            ref={groupCoverInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) updateGroupCover(file)
+              e.target.value = ''
+            }}
+            className="hidden"
+          />
+        </div>
+      )}
+
+      {/* ── MEDIA VIEWER MODAL ── */}
+      {mediaViewer && (
+        <div className="fixed inset-0 z-[60] bg-black flex items-center justify-center">
+          <button
+            onClick={() => setMediaViewer(null)}
+            className="absolute top-6 right-4 w-10 h-10 bg-black/60 rounded-full flex items-center justify-center z-10"
+          >
+            <X className="h-5 w-5 text-white" />
+          </button>
+          <button
+            onClick={() => downloadMedia(mediaViewer.url, `media_${Date.now()}`)}
+            className="absolute top-6 left-4 w-10 h-10 bg-black/60 rounded-full flex items-center justify-center z-10"
+          >
+            <Download className="h-5 w-5 text-white" />
+          </button>
+          {mediaViewer.type === 'image' ? (
+            <Image
+              src={mediaViewer.url}
+              alt="Media viewer"
+              fill
+              className="object-contain"
+              unoptimized
+            />
+          ) : mediaViewer.type === 'video' ? (
+            <video
+              src={mediaViewer.url}
+              controls
+              className="max-w-full max-h-full"
+              autoPlay
+            />
+          ) : null}
+        </div>
+      )}
 
       {/* Hidden file input */}
       <input
