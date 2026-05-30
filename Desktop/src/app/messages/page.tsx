@@ -406,19 +406,35 @@ export default function MessagesPage() {
     setIsCurrentUserAdmin(data?.role === 'admin')
   }
 
-  const fetchGroupMembers = async (groupId: string) => {
-    const { data } = await supabase
-      .from('group_members')
-      .select('user_id, role, profiles(*)')
-      .eq('group_id', groupId)
-    setGroupMembers(data || [])
-    const { data: groupData } = await supabase
-      .from('groups')
-      .select('description')
-      .eq('id', groupId)
-      .single()
-    setGroupDescription(groupData?.description || '')
+ const fetchGroupMembers = async (groupId: string) => {
+  const { data, error } = await supabase
+    .from('group_members')
+    .select(`
+      user_id,
+      role,
+      profiles:profiles!group_members_user_id_fkey(
+        id,
+        display_name,
+        username,
+        avatar_url
+      )
+    `)
+    .eq('group_id', groupId)
+
+  if (error) {
+    console.error('Failed to fetch group members:', error)
+    return
   }
+
+  setGroupMembers(data || [])
+
+  const { data: groupData } = await supabase
+    .from('groups')
+    .select('description')
+    .eq('id', groupId)
+    .single()
+  setGroupDescription(groupData?.description || '')
+}
 
   const markChatAsRead = (chatId: string) => {
     setChats(prev => prev.map(c =>
