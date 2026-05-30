@@ -1119,6 +1119,7 @@ export default function MessagesPage() {
                                       <Play className="h-4 w-4 text-black ml-0.5" />
                                     )}
                                   </div>
+                                  </button>
                                   <div className="flex-1 min-w-0">
                                     <div className="h-1 bg-zinc-500 rounded-full">
                                       <div className={`h-full bg-blue-500 rounded-full ${audioPlaying === url ? 'animate-pulse' : 'w-0'}`} style={{ width: audioPlaying === url ? '100%' : '0%' }} />
