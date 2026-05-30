@@ -41,7 +41,14 @@ export default function CreateForgePage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [showMobilePreview, setShowMobilePreview] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Toast helper
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 3000)
+  }
 
   // Get current user
   useEffect(() => {
@@ -60,7 +67,12 @@ export default function CreateForgePage() {
     const file = e.target.files?.[0]
     if (file) {
       if (!file.name.endsWith('.zip')) {
-        alert('Please select a .zip file')
+        showToast('Please select a .zip file', 'error')
+        return
+      }
+      // Check file size (max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        showToast('File size must be under 50MB', 'error')
         return
       }
       setZipFile(file)
@@ -68,8 +80,8 @@ export default function CreateForgePage() {
   }
 
   const handleCreate = async () => {
-    if (!selectedTemplate || !forgeName || !currentUserId) {
-      alert('Please select a template and enter a name')
+    if (!selectedTemplate || !forgeName.trim() || !currentUserId) {
+      showToast('Please select a template and enter a name', 'error')
       return
     }
     setCreating(true)
@@ -77,24 +89,27 @@ export default function CreateForgePage() {
       const templateConfig = getTemplateConfig(selectedTemplate)
       const previewToken = isPublicPreview ? `preview_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` : null
 
-      // Create the forge
+      // Step 1: Create the forge
       const response = await fetch('/api/forges', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: forgeName,
+          name: forgeName.trim(),
           template_type: selectedTemplate,
-          description: description || null,
+          description: description.trim() || null,
           config: templateConfig.defaultConfig,
           is_collaborative: isCollaborative,
           is_public_preview: isPublicPreview,
           preview_token: previewToken,
         }),
       })
-      if (!response.ok) throw new Error('Failed to create forge')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.error || 'Failed to create forge')
+      }
       const forge = await response.json()
 
-      // Add owner as contributor if collaborative
+      // Step 2: Add owner as contributor if collaborative
       if (isCollaborative && forge?.id) {
         await fetch('/api/forges/contributors', {
           method: 'POST',
@@ -108,21 +123,32 @@ export default function CreateForgePage() {
         })
       }
 
-      // Upload ZIP if provided
+      // Step 3: Upload ZIP if provided
       if (zipFile && forge?.id) {
         setUploading(true)
+        setUploadProgress(10)
+        
         const formData = new FormData()
         formData.append('file', zipFile)
         formData.append('forgeId', forge.id)
+
+        setUploadProgress(30)
 
         const uploadResponse = await fetch('/api/forges/upload', {
           method: 'POST',
           body: formData,
         })
 
+        setUploadProgress(80)
+
         if (uploadResponse.ok) {
           const uploadResult = await uploadResponse.json()
           setPreviewUrl(uploadResult.previewUrl)
+          setUploadProgress(100)
+          showToast('Files uploaded successfully!', 'success')
+        } else {
+          const errorData = await uploadResponse.json().catch(() => null)
+          throw new Error(errorData?.error || 'Failed to upload files')
         }
         setUploading(false)
       }
@@ -130,9 +156,10 @@ export default function CreateForgePage() {
       // Redirect to edit page
       router.push(`/dashboard/forges/${forge.id}/edit`)
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to create forge')
+      showToast(error instanceof Error ? error.message : 'Failed to create forge', 'error')
     } finally {
       setCreating(false)
+      setUploading(false)
     }
   }
 
@@ -209,6 +236,7 @@ export default function CreateForgePage() {
                         onChange={(e) => setForgeName(e.target.value)}
                         placeholder="e.g., My Awesome Project"
                         className="w-full px-4 py-2.5 md:py-3 text-base border border-gray-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
+                        maxLength={100}
                       />
                     </div>
                     <div>
@@ -220,8 +248,10 @@ export default function CreateForgePage() {
                         onChange={(e) => setDescription(e.target.value)}
                         placeholder="Tell others what your forge is about..."
                         rows={3}
+                        maxLength={500}
                         className="w-full px-4 py-2.5 text-base border border-gray-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
                       />
+                      <p className="text-xs text-gray-400 mt-1">{description.length}/500</p>
                     </div>
                   </div>
                 </div>
@@ -240,7 +270,7 @@ export default function CreateForgePage() {
                     >
                       <Upload className="w-8 h-8 md:w-10 md:h-10 text-gray-400 mx-auto mb-3" />
                       <p className="text-sm md:text-base text-gray-600 font-medium">Tap to select a .zip file</p>
-                      <p className="text-xs text-gray-400 mt-1">HTML, CSS, JS projects supported</p>
+                      <p className="text-xs text-gray-400 mt-1">HTML, CSS, JS projects supported (max 50MB)</p>
                       <input ref={fileInputRef} type="file" accept=".zip" onChange={handleZipSelect} className="hidden" />
                     </div>
                   ) : (
@@ -248,9 +278,16 @@ export default function CreateForgePage() {
                       <FileArchive className="w-8 h-8 text-purple-600 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-gray-900 truncate">{zipFile.name}</p>
-                        <p className="text-xs text-gray-500">{(zipFile.size / 1024).toFixed(1)} KB</p>
+                        <p className="text-xs text-gray-500">
+                          {zipFile.size < 1024 * 1024 
+                            ? `${(zipFile.size / 1024).toFixed(1)} KB` 
+                            : `${(zipFile.size / (1024 * 1024)).toFixed(1)} MB`}
+                        </p>
                       </div>
-                      <button onClick={() => { setZipFile(null); setPreviewUrl(null) }} className="p-1.5 rounded-full hover:bg-purple-100 transition-colors">
+                      <button 
+                        onClick={() => { setZipFile(null); setPreviewUrl(null) }} 
+                        className="p-1.5 rounded-full hover:bg-purple-100 transition-colors"
+                      >
                         <X className="w-5 h-5 text-gray-500" />
                       </button>
                     </div>
@@ -260,7 +297,9 @@ export default function CreateForgePage() {
                     <div className="mt-4">
                       <div className="flex items-center gap-2 mb-2">
                         <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
-                        <span className="text-sm text-purple-600 font-medium">Extracting files...</span>
+                        <span className="text-sm text-purple-600 font-medium">
+                          {uploadProgress < 100 ? 'Extracting and uploading files...' : 'Upload complete!'}
+                        </span>
                       </div>
                       <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                         <div
@@ -271,7 +310,8 @@ export default function CreateForgePage() {
                     </div>
                   )}
 
-                  {previewUrl && (
+                  {/* Preview Toggle */}
+                  {previewUrl && !uploading && (
                     <div className="mt-4">
                       <button
                         onClick={() => setShowMobilePreview(!showMobilePreview)}
@@ -321,7 +361,7 @@ export default function CreateForgePage() {
                   {isCollaborative && (
                     <div className="mt-3 text-xs md:text-sm text-green-700 bg-green-50 p-3 rounded-xl border border-green-200 flex items-start gap-2">
                       <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                      <span>Team collaboration enabled.</span>
+                      <span>Team collaboration, file system, and contributor panel enabled.</span>
                     </div>
                   )}
                 </div>
@@ -340,9 +380,15 @@ export default function CreateForgePage() {
                         <Share2 className="w-4 h-4 text-purple-600" />
                         Public Preview Link
                       </div>
-                      <p className="text-xs md:text-sm text-gray-600 mt-1">Generate a shareable preview link.</p>
+                      <p className="text-xs md:text-sm text-gray-600 mt-1">Generate a shareable preview link for your project.</p>
                     </div>
                   </label>
+                  {isPublicPreview && (
+                    <div className="mt-3 text-xs md:text-sm text-blue-700 bg-blue-50 p-3 rounded-xl border border-blue-200 flex items-start gap-2">
+                      <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span>A public preview link will be created automatically.</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Desktop Create Button */}
@@ -406,6 +452,19 @@ export default function CreateForgePage() {
           </>
         )}
       </div>
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-2 duration-300">
+          <div className={`px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium ${
+            toast.type === 'error' ? 'bg-red-500 text-white' :
+            toast.type === 'success' ? 'bg-green-500 text-white' :
+            'bg-gray-800 text-white'
+          }`}>
+            {toast.message}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
