@@ -212,7 +212,6 @@ export default function MessagesPage() {
     if (!currentUserId) return
     setLoading(true)
     try {
-      // Fetch direct conversations
       const { data: participants } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
@@ -273,7 +272,6 @@ export default function MessagesPage() {
         }
       }
       
-      // Fetch group chats
       const { data: groupMemberships } = await supabase
         .from('group_members')
         .select('group_id, groups(*)')
@@ -376,7 +374,6 @@ export default function MessagesPage() {
       if (error) throw error
       setMessages(data || [])
       
-      // Mark as read
       if (data?.length) {
         await supabase
           .from('messages')
@@ -717,447 +714,627 @@ export default function MessagesPage() {
   if (!currentUserId) return null
 
   return (
-    <div className="h-screen flex flex-col bg-gray-100">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-20 flex-shrink-0">
-        <div className="max-w-7xl mx-auto px-4 py-3">
-          <div className="flex items-center justify-between">
+    <div className="h-[100dvh] flex flex-col bg-black overflow-hidden">
+
+      {/* ── CHAT LIST VIEW (mobile: full screen, desktop: left panel) ── */}
+      <div className={`
+        flex flex-col bg-black
+        ${selectedChat ? 'hidden md:flex md:w-[360px] md:border-r md:border-zinc-800' : 'flex flex-1'}
+        md:flex md:w-[360px] md:flex-shrink-0 md:border-r md:border-zinc-800
+        absolute md:relative inset-0 z-10 md:z-auto
+      `}>
+
+        {/* Header */}
+        <div className="px-4 pt-14 pb-2 bg-black flex-shrink-0">
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-full transition active:scale-95">
-                <ArrowLeft className="h-5 w-5 text-gray-600" />
+              <button
+                onClick={() => router.back()}
+                className="w-8 h-8 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
+              >
+                <ArrowLeft className="h-5 w-5 text-white" />
               </button>
-              <h1 className="text-xl font-bold text-gray-900">Chats</h1>
+              <span className="text-white text-xl font-bold tracking-tight">
+                {currentUserProfile?.username || 'Messages'}
+              </span>
             </div>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowNewGroup(true)}
-                className="p-2 hover:bg-gray-100 rounded-full transition active:scale-95"
+                className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
               >
-                <FolderPlus className="h-5 w-5 text-gray-600" />
+                <FolderPlus className="h-[22px] w-[22px] text-white" />
               </button>
               <button
                 onClick={() => setShowNewChat(!showNewChat)}
-                className="p-2 hover:bg-gray-100 rounded-full transition active:scale-95"
+                className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
               >
-                <MessageCircle className="h-5 w-5 text-orange-500" />
+                <Edit2 className="h-[22px] w-[22px] text-white" />
               </button>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="flex-1 flex overflow-hidden max-w-7xl mx-auto w-full">
-        {/* Left Panel - Chats List */}
-        <div className={`
-          ${selectedChat && isMobileMenuOpen ? 'hidden' : 'flex'} 
-          md:flex md:w-96 flex-col bg-white border-r border-gray-200
-          w-full absolute md:relative inset-0 z-10 md:z-auto
-        `}>
-          {/* Search */}
-          <div className="p-3 border-b border-gray-100 flex-shrink-0">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search chats"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-3 py-2.5 text-sm bg-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:bg-white transition"
-              />
+          {/* Search bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+            <input
+              type="text"
+              placeholder="Search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 text-sm bg-zinc-800 text-white placeholder-zinc-400 rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-600 transition"
+            />
+          </div>
+        </div>
+
+        {/* New Chat / New Group Panel */}
+        {(showNewChat || showNewGroup) && (
+          <div className="border-b border-zinc-800 max-h-[45vh] overflow-y-auto flex-shrink-0 bg-zinc-950">
+            <div className="px-4 py-3">
+              {showNewGroup ? (
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-semibold text-zinc-300">New Group</span>
+                    <button onClick={() => { setShowNewGroup(false); setSelectedMembers([]); setNewGroupName('') }}
+                      className="w-7 h-7 flex items-center justify-center rounded-full bg-zinc-700 active:bg-zinc-600">
+                      <X className="h-3.5 w-3.5 text-white" />
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Group name"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    className="w-full px-4 py-2.5 text-sm bg-zinc-800 text-white placeholder-zinc-500 rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-500 mb-3"
+                  />
+                  <p className="text-xs text-zinc-500 mb-2 px-1">Add people · {selectedMembers.length} selected</p>
+                  <div className="space-y-0.5">
+                    {allies.map((ally) => (
+                      <button
+                        key={ally.id}
+                        onClick={() => {
+                          if (selectedMembers.includes(ally.id)) {
+                            setSelectedMembers(prev => prev.filter(id => id !== ally.id))
+                          } else {
+                            setSelectedMembers(prev => [...prev, ally.id])
+                          }
+                        }}
+                        className={`w-full flex items-center gap-3 px-2 py-2.5 rounded-xl transition-colors ${
+                          selectedMembers.includes(ally.id) ? 'bg-zinc-800' : 'active:bg-zinc-800'
+                        }`}
+                      >
+                        <Avatar className="h-10 w-10 flex-shrink-0">
+                          {ally.avatar_url && <AvatarImage src={ally.avatar_url} />}
+                          <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-sm font-bold">
+                            {ally.display_name?.[0]?.toUpperCase() || '?'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 text-left min-w-0">
+                          <p className="text-sm font-medium text-white truncate">{ally.display_name}</p>
+                          <p className="text-xs text-zinc-500 truncate">@{ally.username}</p>
+                        </div>
+                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                          selectedMembers.includes(ally.id)
+                            ? 'bg-blue-500 border-blue-500'
+                            : 'border-zinc-600'
+                        }`}>
+                          {selectedMembers.includes(ally.id) && <Check className="h-3 w-3 text-white" />}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={createGroup}
+                    disabled={!newGroupName.trim() || selectedMembers.length === 0 || creatingGroup}
+                    className="w-full mt-3 py-2.5 bg-blue-500 text-white rounded-full text-sm font-semibold disabled:opacity-40 active:bg-blue-600 transition-colors"
+                  >
+                    {creatingGroup ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : 'Create Group'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-semibold text-zinc-300">New Message</span>
+                    <button onClick={() => setShowNewChat(false)}
+                      className="w-7 h-7 flex items-center justify-center rounded-full bg-zinc-700 active:bg-zinc-600">
+                      <X className="h-3.5 w-3.5 text-white" />
+                    </button>
+                  </div>
+                  {loadingAllies ? (
+                    <div className="flex justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+                    </div>
+                  ) : filteredAllies.length === 0 ? (
+                    <p className="text-sm text-zinc-500 text-center py-8">No contacts found</p>
+                  ) : (
+                    <div className="space-y-0.5">
+                      {filteredAllies.map((ally) => {
+                        const existingConv = chats.find(c => c.type === 'direct' && c.other_user?.id === ally.id)
+                        return (
+                          <button
+                            key={ally.id}
+                            onClick={() => {
+                              if (existingConv) {
+                                setSelectedChat(existingConv)
+                                setShowNewChat(false)
+                              } else {
+                                getOrCreateConversation(ally.id).then(convId => {
+                                  if (convId) fetchChats()
+                                  setSelectedChat({
+                                    id: convId!,
+                                    type: 'direct',
+                                    name: ally.display_name,
+                                    avatar_url: ally.avatar_url,
+                                    other_user: ally,
+                                    last_message: null,
+                                    unread_count: 0,
+                                    updated_at: new Date().toISOString()
+                                  })
+                                  setShowNewChat(false)
+                                })
+                              }
+                            }}
+                            className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl active:bg-zinc-800 transition-colors"
+                          >
+                            <Avatar className="h-11 w-11 flex-shrink-0">
+                              {ally.avatar_url && <AvatarImage src={ally.avatar_url} />}
+                              <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-sm font-bold">
+                                {ally.display_name?.[0]?.toUpperCase() || '?'}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 text-left min-w-0">
+                              <p className="text-sm font-semibold text-white truncate">{ally.display_name}</p>
+                              <p className="text-xs text-zinc-500 truncate">@{ally.username}</p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
+        )}
 
-          {/* New Chat Panel */}
-          {(showNewChat || showNewGroup) && (
-            <div className="border-b border-gray-100 max-h-96 overflow-y-auto bg-orange-50/20 flex-shrink-0">
-              <div className="p-3">
-                {showNewGroup ? (
-                  // Create Group UI
-                  <>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-gray-700">Create Group</h3>
-                      <button onClick={() => { setShowNewGroup(false); setSelectedMembers([]); setNewGroupName('') }} className="p-1 hover:bg-gray-200 rounded-full">
-                        <X className="h-4 w-4 text-gray-500" />
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Group name"
-                      value={newGroupName}
-                      onChange={(e) => setNewGroupName(e.target.value)}
-                      className="w-full px-3 py-2 text-sm bg-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 mb-3"
-                    />
-                    <p className="text-xs text-gray-500 mb-2">Select members ({selectedMembers.length})</p>
-                    <div className="space-y-1 max-h-48 overflow-y-auto">
-                      {allies.map((ally) => (
-                        <button
-                          key={ally.id}
-                          onClick={() => {
-                            if (selectedMembers.includes(ally.id)) {
-                              setSelectedMembers(prev => prev.filter(id => id !== ally.id))
-                            } else {
-                              setSelectedMembers(prev => [...prev, ally.id])
-                            }
-                          }}
-                          className={`w-full flex items-center gap-3 p-2 rounded-xl transition ${selectedMembers.includes(ally.id) ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
-                        >
-                          <Avatar className="h-10 w-10">
-                            {ally.avatar_url && <AvatarImage src={ally.avatar_url} />}
-                            <AvatarFallback className="bg-gradient-to-br from-orange-400 to-purple-600 text-white">
-                              {ally.display_name?.[0]?.toUpperCase() || '?'}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 text-left">
-                            <p className="font-medium text-gray-900">{ally.display_name}</p>
-                            <p className="text-xs text-gray-400">@{ally.username}</p>
-                          </div>
-                          {selectedMembers.includes(ally.id) && <Check className="h-4 w-4 text-orange-500" />}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={createGroup}
-                      disabled={!newGroupName.trim() || selectedMembers.length === 0 || creatingGroup}
-                      className="w-full mt-3 py-2 bg-gradient-to-r from-orange-500 to-purple-600 text-white rounded-full text-sm font-medium disabled:opacity-50 active:scale-95 transition"
-                    >
-                      {creatingGroup ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : 'Create Group'}
-                    </button>
-                  </>
-                ) : (
-                  // New Chat UI
-                  <>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-gray-700">Contacts</h3>
-                      <button onClick={() => setShowNewChat(false)} className="p-1 hover:bg-gray-200 rounded-full">
-                        <X className="h-4 w-4 text-gray-500" />
-                      </button>
-                    </div>
-                    {loadingAllies ? (
-                      <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-orange-500" /></div>
-                    ) : filteredAllies.length === 0 ? (
-                      <p className="text-sm text-gray-500 text-center py-8">No contacts found</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {filteredAllies.map((ally) => {
-                          const existingConv = chats.find(c => c.type === 'direct' && c.other_user?.id === ally.id)
-                          return (
-                            <button
-                              key={ally.id}
-                              onClick={() => {
-                                if (existingConv) {
-                                  setSelectedChat(existingConv)
-                                  setShowNewChat(false)
-                                } else {
-                                  getOrCreateConversation(ally.id).then(convId => {
-                                    if (convId) fetchChats()
-                                    setSelectedChat({
-                                      id: convId!,
-                                      type: 'direct',
-                                      name: ally.display_name,
-                                      avatar_url: ally.avatar_url,
-                                      other_user: ally,
-                                      last_message: null,
-                                      unread_count: 0,
-                                      updated_at: new Date().toISOString()
-                                    })
-                                    setShowNewChat(false)
-                                  })
-                                }
-                              }}
-                              className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 transition active:bg-gray-100"
-                            >
-                              <Avatar className="h-12 w-12">
-                                {ally.avatar_url && <AvatarImage src={ally.avatar_url} />}
-                                <AvatarFallback className="bg-gradient-to-br from-orange-400 to-purple-600 text-white">
-                                  {ally.display_name?.[0]?.toUpperCase() || '?'}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div className="flex-1 text-left">
-                                <p className="font-medium text-gray-900">{ally.display_name}</p>
-                                <p className="text-xs text-gray-400">@{ally.username}</p>
-                              </div>
-                              {existingConv ? <ArrowRight className="h-4 w-4 text-gray-400" /> : <Send className="h-4 w-4 text-gray-400" />}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
+        {/* Chat List */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex justify-center pt-16">
+              <Loader2 className="h-7 w-7 animate-spin text-zinc-600" />
             </div>
-          )}
-
-          {/* Chats List */}
-          <div className="flex-1 overflow-y-auto">
-            {loading ? (
-              <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-orange-500" /></div>
-            ) : filteredChats.length === 0 ? (
-              <div className="text-center py-12 px-4">
-                <MessageCircle className="h-16 w-16 mx-auto text-gray-300 mb-4" />
-                <p className="text-gray-500 font-medium">No messages yet</p>
-                <p className="text-sm text-gray-400 mt-1">Start a conversation</p>
+          ) : filteredChats.length === 0 ? (
+            <div className="flex flex-col items-center justify-center pt-20 px-8 text-center">
+              <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center mb-4">
+                <MessageCircle className="h-8 w-8 text-zinc-500" />
               </div>
-            ) : (
-              filteredChats.map((chat) => (
+              <p className="text-white font-semibold mb-1">No messages yet</p>
+              <p className="text-sm text-zinc-500">Start a conversation with someone</p>
+            </div>
+          ) : (
+            <div className="pt-1">
+              {filteredChats.map((chat) => (
                 <button
                   key={chat.id}
-                  onClick={() => { setSelectedChat(chat); setIsMobileMenuOpen(false); setShowNewChat(false); setShowNewGroup(false); }}
-                  className={`w-full p-3 flex gap-3 hover:bg-gray-50 transition-all border-b border-gray-50 active:bg-gray-100 ${
-                    selectedChat?.id === chat.id ? 'bg-orange-50' : ''
+                  onClick={() => {
+                    setSelectedChat(chat)
+                    setIsMobileMenuOpen(false)
+                    setShowNewChat(false)
+                    setShowNewGroup(false)
+                  }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 transition-colors active:bg-zinc-900 ${
+                    selectedChat?.id === chat.id ? 'bg-zinc-900' : ''
                   }`}
                 >
-                  <Avatar className="h-14 w-14">
-                    {chat.avatar_url && <AvatarImage src={chat.avatar_url} />}
-                    <AvatarFallback className="bg-gradient-to-br from-orange-400 to-purple-600 text-white text-base font-bold">
-                      {chat.name?.[0]?.toUpperCase() || '?'}
-                    </AvatarFallback>
-                  </Avatar>
+                  {/* Avatar with story-ring style for unread */}
+                  <div className={`relative flex-shrink-0 ${chat.unread_count > 0 ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-black rounded-full' : ''}`}>
+                    <Avatar className="h-14 w-14">
+                      {chat.avatar_url && <AvatarImage src={chat.avatar_url} />}
+                      <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-lg font-bold">
+                        {chat.name?.[0]?.toUpperCase() || '?'}
+                      </AvatarFallback>
+                    </Avatar>
+                    {chat.type === 'group' && (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 bg-zinc-700 rounded-full border-2 border-black flex items-center justify-center">
+                        <Users className="h-2.5 w-2.5 text-zinc-300" />
+                      </div>
+                    )}
+                  </div>
+
                   <div className="flex-1 min-w-0 text-left">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1">
-                        {chat.type === 'group' && <Users className="h-3 w-3 text-gray-400" />}
-                        <h3 className="font-semibold text-gray-900 truncate">{chat.name}</h3>
-                      </div>
+                      <span className={`text-sm truncate ${chat.unread_count > 0 ? 'font-bold text-white' : 'font-semibold text-white'}`}>
+                        {chat.name}
+                      </span>
                       {chat.last_message && (
-                        <span className="text-[10px] text-gray-400 flex-shrink-0">
+                        <span className={`text-[11px] flex-shrink-0 ${chat.unread_count > 0 ? 'text-blue-400 font-medium' : 'text-zinc-500'}`}>
                           {timeAgo(chat.last_message.created_at)}
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-500 truncate flex items-center gap-1">
-                      {chat.last_message?.user_id === currentUserId && <CheckCheck className="h-3 w-3 text-blue-500" />}
-                      {chat.last_message?.content || 'No messages yet'}
-                    </p>
-                  </div>
-                  {chat.unread_count > 0 && (
-                    <div className="min-w-[20px] h-5 px-1.5 rounded-full bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center">
-                      {chat.unread_count}
-                    </div>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Chat Area */}
-        <div className={`
-          ${!selectedChat ? 'hidden md:flex' : 'flex'} 
-          flex-1 flex-col bg-gray-50
-          absolute md:relative inset-0 md:inset-auto z-20 md:z-auto
-        `}>
-          {selectedChat ? (
-            <>
-              {/* Chat Header */}
-              <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm flex-shrink-0">
-                <div className="flex items-center gap-3">
-                  <button onClick={() => { setSelectedChat(null); setIsMobileMenuOpen(true); }} className="md:hidden p-2 -ml-2 hover:bg-gray-100 rounded-full active:bg-gray-200">
-                    <ArrowLeft className="h-5 w-5 text-gray-600" />
-                  </button>
-                  <Link href={selectedChat.type === 'direct' ? `/profile/${selectedChat.other_user?.username}` : '#'}>
-                    <Avatar className="h-10 w-10 cursor-pointer hover:opacity-80">
-                      {selectedChat.avatar_url && <AvatarImage src={selectedChat.avatar_url} />}
-                      <AvatarFallback className="bg-gradient-to-br from-orange-400 to-purple-600 text-white">
-                        {selectedChat.name?.[0]?.toUpperCase() || '?'}
-                      </AvatarFallback>
-                    </Avatar>
-                  </Link>
-                  <div>
-                    <Link href={selectedChat.type === 'direct' ? `/profile/${selectedChat.other_user?.username}` : '#'}>
-                      <h3 className="font-semibold text-gray-900 hover:text-orange-600">
-                        {selectedChat.name}
-                        {selectedChat.type === 'group' && <span className="text-xs text-gray-400 ml-1">({selectedChat.group?.member_count || 0})</span>}
-                      </h3>
-                    </Link>
-                    {selectedChat.type === 'direct' && selectedChat.other_user && (
-                      <p className="text-xs text-gray-400">@{selectedChat.other_user.username}</p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button className="p-2 hover:bg-gray-100 rounded-full transition active:bg-gray-200">
-                    <Phone className="h-5 w-5 text-gray-600" />
-                  </button>
-                  <button className="p-2 hover:bg-gray-100 rounded-full transition active:bg-gray-200">
-                    <Video className="h-5 w-5 text-gray-600" />
-                  </button>
-                  <button className="p-2 hover:bg-gray-100 rounded-full transition active:bg-gray-200">
-                    <Info className="h-5 w-5 text-gray-600" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Messages Area */}
-              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-2">
-                {/* Reply indicator */}
-                {replyingTo && (
-                  <div className="bg-gray-100 rounded-lg p-2 mb-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Reply className="h-4 w-4 text-gray-500" />
-                      <span className="text-gray-600">Replying to {replyingTo.profiles?.display_name}</span>
-                      <span className="text-gray-400 text-xs line-clamp-1">"{replyingTo.content.substring(0, 50)}"</span>
-                    </div>
-                    <button onClick={() => setReplyingTo(null)} className="p-1 hover:bg-gray-200 rounded-full">
-                      <X className="h-4 w-4 text-gray-500" />
-                    </button>
-                  </div>
-                )}
-                
-                {messages.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                    <MessageCircle className="h-16 w-16 mb-4 opacity-30" />
-                    <p className="text-sm font-medium">No messages yet</p>
-                    <p className="text-xs mt-1">Send a message to start</p>
-                  </div>
-                ) : (
-                  messages.map((message, index) => {
-                    const isOwn = message.user_id === currentUserId
-                    const showAvatar = !isOwn && (index === 0 || messages[index - 1]?.user_id !== message.user_id)
-                    
-                    return (
-                      <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} items-end gap-2`}>
-                        {!isOwn && showAvatar && (
-                          <Avatar className="h-8 w-8 mb-1 flex-shrink-0">
-                            {message.profiles?.avatar_url && <AvatarImage src={message.profiles.avatar_url} />}
-                            <AvatarFallback className="bg-gradient-to-br from-orange-400 to-purple-600 text-white text-xs">
-                              {message.profiles?.display_name?.[0]?.toUpperCase() || '?'}
-                            </AvatarFallback>
-                          </Avatar>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <p className={`text-sm truncate flex items-center gap-1 ${chat.unread_count > 0 ? 'text-white font-medium' : 'text-zinc-500'}`}>
+                        {chat.last_message?.user_id === currentUserId && (
+                          <CheckCheck className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />
                         )}
-                        {!isOwn && !showAvatar && <div className="w-8 flex-shrink-0" />}
-                        
-                        <div className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
-                          isOwn ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
-                        }`}>
-                          {/* Reply reference */}
-                          {message.reply_to && (
-                            <div className="text-xs opacity-70 mb-1 pb-1 border-b border-current border-opacity-20">
-                              <span className="font-medium">↩️ Replying to {message.reply_to.profiles?.display_name}</span>
-                              <p className="truncate">{message.reply_to.content.substring(0, 50)}</p>
-                            </div>
-                          )}
-                          
-                          {/* Media content */}
-                          {message.media_urls?.map((url, i) => (
-                            <div key={i} className="mb-2">
-                              {message.media_types[i] === 'image' ? (
-                                <Image src={url} alt="Image" width={200} height={200} className="rounded-lg max-w-full cursor-pointer" unoptimized />
-                              ) : message.media_types[i] === 'video' ? (
-                                <video src={url} controls className="rounded-lg max-w-full max-h-64" />
-                              ) : message.media_types[i] === 'audio' ? (
-                                <audio src={url} controls className="w-full" />
-                              ) : (
-                                <a href={url} target="_blank" className="flex items-center gap-2 text-blue-500 underline">
-                                  <File className="h-4 w-4" /> View file
-                                </a>
-                              )}
-                            </div>
-                          ))}
-                          
-                          {/* Text content */}
-                          {message.content && <p className="text-sm break-words whitespace-pre-wrap">{message.content}</p>}
-                          
-                          {/* Message actions */}
-                          <div className="flex items-center justify-end gap-2 mt-1">
-                            <button onClick={() => setReplyingTo(message)} className="opacity-0 group-hover:opacity-100 transition">
-                              <Reply className="h-3 w-3 text-gray-400 hover:text-orange-500" />
-                            </button>
-                            <p className={`text-[10px] flex items-center gap-1 ${isOwn ? 'text-orange-100' : 'text-gray-400'}`}>
-                              {timeAgo(message.created_at)}
-                              {isOwn && (message.is_read ? <CheckCheck className="h-3 w-3" /> : <Clock className="h-3 w-3" />)}
-                            </p>
-                          </div>
+                        {chat.last_message?.content || 'No messages yet'}
+                      </p>
+                      {chat.unread_count > 0 && (
+                        <div className="w-5 h-5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                          {chat.unread_count > 9 ? '9+' : chat.unread_count}
                         </div>
-                      </div>
-                    )
-                  })
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* Recording indicator */}
-              {recording && (
-                <div className="bg-red-500 text-white p-3 text-center flex items-center justify-center gap-2">
-                  <div className="w-3 h-3 bg-white rounded-full animate-pulse" />
-                  Recording voice note... {formatDuration(recordingTime)}
-                  <button onClick={stopRecording} className="px-3 py-1 bg-white text-red-500 rounded-full text-xs font-bold">
-                    Stop
-                  </button>
-                </div>
-              )}
-
-              {/* Input Area */}
-              <div className="bg-white border-t border-gray-200 p-3 flex-shrink-0">
-                {/* Selected media preview */}
-                {selectedMedia.length > 0 && (
-                  <div className="flex gap-2 mb-2 overflow-x-auto pb-2">
-                    {selectedMedia.map((file, i) => (
-                      <div key={i} className="relative w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center">
-                        {file.type.startsWith('image/') ? (
-                          <Image src={URL.createObjectURL(file)} alt="Preview" width={64} height={64} className="object-cover rounded-lg" />
-                        ) : (
-                          <File className="h-8 w-8 text-gray-400" />
-                        )}
-                        <button onClick={() => setSelectedMedia(prev => prev.filter((_, idx) => idx !== i))} className="absolute -top-2 -right-2 p-1 bg-red-500 rounded-full">
-                          <X className="h-3 w-3 text-white" />
-                        </button>
-                      </div>
-                    ))}
+                      )}
+                    </div>
                   </div>
-                )}
-                
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 hover:bg-gray-100 rounded-full transition flex-shrink-0 active:bg-gray-200">
-                    <Smile className="h-5 w-5 text-gray-500" />
-                  </button>
-                  <button onClick={handleFileSelect} className="p-2 hover:bg-gray-100 rounded-full transition flex-shrink-0 active:bg-gray-200">
-                    <Paperclip className="h-5 w-5 text-gray-500" />
-                  </button>
-                  <button onMouseDown={startRecording} onMouseUp={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording} className="p-2 hover:bg-gray-100 rounded-full transition flex-shrink-0 active:bg-gray-200">
-                    <Mic className="h-5 w-5 text-gray-500" />
-                  </button>
-                  <textarea
-                    ref={inputRef}
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyDown={handleKeyPress}
-                    placeholder="Type a message..."
-                    className="flex-1 resize-none rounded-2xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 transition min-h-[44px] max-h-[120px]"
-                    rows={1}
-                    style={{ height: 'auto' }}
-                  />
-                  <button
-                    onClick={sendMessage}
-                    disabled={(!messageInput.trim() && selectedMedia.length === 0) || sending}
-                    className="p-2 rounded-full bg-gradient-to-r from-orange-500 to-purple-600 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg transition flex-shrink-0 active:scale-95"
-                  >
-                    {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-                  </button>
-                </div>
-                
-                <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*" multiple onChange={handleFileChange} className="hidden" />
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-orange-100 to-purple-100 flex items-center justify-center mb-6">
-                <MessageCircle className="h-12 w-12 text-orange-500" />
-              </div>
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">Your Messages</h3>
-              <p className="text-gray-500 max-w-sm">Select a conversation or start a new chat</p>
-              <div className="flex gap-3 mt-6">
-                <button onClick={() => setShowNewChat(true)} className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-purple-600 text-white font-medium rounded-full active:scale-95 transition">
-                  New Chat
                 </button>
-                <button onClick={() => setShowNewGroup(true)} className="px-6 py-2.5 bg-gray-200 text-gray-700 font-medium rounded-full active:scale-95 transition">
-                  New Group
-                </button>
-              </div>
+              ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* ── CHAT VIEW ── */}
+      <div className={`
+        flex-1 flex flex-col bg-black
+        ${!selectedChat ? 'hidden md:flex' : 'flex'}
+        absolute md:relative inset-0 md:inset-auto z-20 md:z-auto
+      `}>
+        {selectedChat ? (
+          <>
+            {/* Chat Header */}
+            <div className="flex-shrink-0 bg-black/95 backdrop-blur-xl border-b border-zinc-800/60 px-3 pt-12 pb-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setSelectedChat(null); setIsMobileMenuOpen(true) }}
+                  className="md:hidden w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors mr-1"
+                >
+                  <ArrowLeft className="h-5 w-5 text-white" />
+                </button>
+
+                <Link href={selectedChat.type === 'direct' ? `/profile/${selectedChat.other_user?.username}` : '#'} className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <Avatar className="h-9 w-9 flex-shrink-0">
+                    {selectedChat.avatar_url && <AvatarImage src={selectedChat.avatar_url} />}
+                    <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-sm font-bold">
+                      {selectedChat.name?.[0]?.toUpperCase() || '?'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white truncate leading-tight">
+                      {selectedChat.name}
+                      {selectedChat.type === 'group' && (
+                        <span className="text-xs text-zinc-400 font-normal ml-1">
+                          · {selectedChat.group?.member_count || 0} members
+                        </span>
+                      )}
+                    </p>
+                    {selectedChat.type === 'direct' && selectedChat.other_user && (
+                      <p className="text-[11px] text-zinc-500 truncate">@{selectedChat.other_user.username}</p>
+                    )}
+                  </div>
+                </Link>
+
+                <div className="flex items-center gap-0.5 flex-shrink-0">
+                  <button className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors">
+                    <Phone className="h-[18px] w-[18px] text-white" />
+                  </button>
+                  <button className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors">
+                    <Video className="h-[18px] w-[18px] text-white" />
+                  </button>
+                  <button className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors">
+                    <Info className="h-[18px] w-[18px] text-white" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Messages */}
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto px-3 py-4 space-y-1"
+              style={{ background: 'linear-gradient(180deg, #0a0a0a 0%, #000 100%)' }}
+            >
+              {messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center pb-10">
+                  <Avatar className="h-20 w-20 mb-4">
+                    {selectedChat.avatar_url && <AvatarImage src={selectedChat.avatar_url} />}
+                    <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-2xl font-bold">
+                      {selectedChat.name?.[0]?.toUpperCase() || '?'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <p className="text-white font-bold text-lg">{selectedChat.name}</p>
+                  {selectedChat.type === 'direct' && selectedChat.other_user && (
+                    <p className="text-zinc-500 text-sm mt-1">@{selectedChat.other_user.username}</p>
+                  )}
+                  <p className="text-zinc-600 text-sm mt-4">Say hello 👋</p>
+                </div>
+              ) : (
+                messages.map((message, index) => {
+                  const isOwn = message.user_id === currentUserId
+                  const prevMsg = messages[index - 1]
+                  const nextMsg = messages[index + 1]
+                  const showAvatar = !isOwn && (
+                    !prevMsg || prevMsg.user_id !== message.user_id
+                  )
+                  const isGrouped = nextMsg && nextMsg.user_id === message.user_id
+                  const isFirst = !prevMsg || prevMsg.user_id !== message.user_id
+                  const isLast = !nextMsg || nextMsg.user_id !== message.user_id
+
+                  return (
+                    <div
+                      key={message.id}
+                      className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'} ${isGrouped ? 'mb-0.5' : 'mb-1'}`}
+                    >
+                      {/* Avatar (other users only) */}
+                      {!isOwn && (
+                        <div className="w-7 flex-shrink-0 mb-1">
+                          {isLast ? (
+                            <Avatar className="h-7 w-7">
+                              {message.profiles?.avatar_url && <AvatarImage src={message.profiles.avatar_url} />}
+                              <AvatarFallback className="bg-gradient-to-br from-orange-500 to-pink-600 text-white text-[10px] font-bold">
+                                {message.profiles?.display_name?.[0]?.toUpperCase() || '?'}
+                              </AvatarFallback>
+                            </Avatar>
+                          ) : null}
+                        </div>
+                      )}
+
+                      {/* Bubble */}
+                      <div className={`max-w-[72%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
+                        {/* Sender name for groups */}
+                        {!isOwn && isFirst && selectedChat.type === 'group' && (
+                          <span className="text-[11px] text-zinc-400 font-medium mb-1 ml-3">
+                            {message.profiles?.display_name}
+                          </span>
+                        )}
+
+                        {/* Reply reference */}
+                        {message.reply_to && (
+                          <div className={`mb-1 px-3 py-1.5 rounded-xl text-xs border-l-2 border-blue-500 max-w-full ${
+                            isOwn ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800 text-zinc-400'
+                          }`}>
+                            <span className="font-medium text-blue-400">
+                              {message.reply_to.profiles?.display_name}
+                            </span>
+                            <p className="truncate mt-0.5">{message.reply_to.content.substring(0, 60)}</p>
+                          </div>
+                        )}
+
+                        <div
+                          className={`relative px-3 py-2 ${
+                            isOwn
+                              ? `bg-blue-500 text-white ${
+                                  isFirst && isLast ? 'rounded-2xl rounded-br-md'
+                                  : isFirst ? 'rounded-2xl rounded-br-md rounded-br-sm'
+                                  : isLast ? 'rounded-2xl rounded-tr-sm rounded-br-md'
+                                  : 'rounded-2xl rounded-r-sm'
+                                }`
+                              : `bg-zinc-800 text-white ${
+                                  isFirst && isLast ? 'rounded-2xl rounded-bl-md'
+                                  : isFirst ? 'rounded-2xl rounded-bl-md rounded-bl-sm'
+                                  : isLast ? 'rounded-2xl rounded-tl-sm rounded-bl-md'
+                                  : 'rounded-2xl rounded-l-sm'
+                                }`
+                          }`}
+                        >
+                          {/* Media */}
+                          {message.media_urls?.map((url, i) => (
+                            <div key={i} className="mb-1">
+                              {message.media_types[i] === 'image' ? (
+                                <Image
+                                  src={url} alt="Image"
+                                  width={220} height={220}
+                                  className="rounded-xl max-w-full object-cover"
+                                  unoptimized
+                                />
+                              ) : message.media_types[i] === 'video' ? (
+                                <video src={url} controls className="rounded-xl max-w-full max-h-56" />
+                              ) : message.media_types[i] === 'audio' ? (
+                                <audio src={url} controls className="w-full max-w-[200px]" />
+                              ) : (
+                                <a href={url} target="_blank" className="flex items-center gap-2 text-blue-300 text-sm">
+                                  <File className="h-4 w-4 flex-shrink-0" />
+                                  <span className="underline truncate">View file</span>
+                                </a>
+                              )}
+                            </div>
+                          ))}
+
+                          {/* Text */}
+                          {message.content && (
+                            <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                              {message.content}
+                            </p>
+                          )}
+
+                          {/* Timestamp + status */}
+                          <div className={`flex items-center gap-1 mt-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                            <span className={`text-[10px] ${isOwn ? 'text-blue-100/70' : 'text-zinc-500'}`}>
+                              {timeAgo(message.created_at)}
+                            </span>
+                            {isOwn && (
+                              message.is_read
+                                ? <CheckCheck className="h-3 w-3 text-blue-100/70" />
+                                : <Clock className="h-3 w-3 text-blue-100/40" />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Reply button */}
+                        <button
+                          onClick={() => setReplyingTo(message)}
+                          className="opacity-0 hover:opacity-100 mt-0.5 px-2 py-0.5 rounded-full text-[10px] text-zinc-500 active:bg-zinc-800 transition-all flex items-center gap-1"
+                        >
+                          <Reply className="h-3 w-3" /> Reply
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Recording indicator */}
+            {recording && (
+              <div className="flex-shrink-0 bg-red-600/90 px-4 py-2.5 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
+                  <span className="text-white text-sm font-medium">Recording {formatDuration(recordingTime)}</span>
+                </div>
+                <button
+                  onClick={stopRecording}
+                  className="px-3.5 py-1.5 bg-white text-red-600 rounded-full text-xs font-bold active:bg-red-50"
+                >
+                  Stop & Send
+                </button>
+              </div>
+            )}
+
+            {/* Reply preview bar */}
+            {replyingTo && (
+              <div className="flex-shrink-0 bg-zinc-900 border-t border-zinc-800 px-4 py-2 flex items-center gap-3">
+                <div className="w-0.5 h-8 bg-blue-500 rounded-full flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] text-blue-400 font-medium">
+                    {replyingTo.profiles?.display_name}
+                  </p>
+                  <p className="text-xs text-zinc-400 truncate">{replyingTo.content.substring(0, 60)}</p>
+                </div>
+                <button
+                  onClick={() => setReplyingTo(null)}
+                  className="w-6 h-6 flex items-center justify-center rounded-full bg-zinc-700 active:bg-zinc-600 flex-shrink-0"
+                >
+                  <X className="h-3.5 w-3.5 text-white" />
+                </button>
+              </div>
+            )}
+
+            {/* Media preview */}
+            {selectedMedia.length > 0 && (
+              <div className="flex-shrink-0 bg-zinc-900 border-t border-zinc-800 px-4 py-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {selectedMedia.map((file, i) => (
+                    <div key={i} className="relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 bg-zinc-800">
+                      {file.type.startsWith('image/') ? (
+                        <Image src={URL.createObjectURL(file)} alt="Preview" fill className="object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <File className="h-6 w-6 text-zinc-400" />
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setSelectedMedia(prev => prev.filter((_, idx) => idx !== i))}
+                        className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 rounded-full flex items-center justify-center"
+                      >
+                        <X className="h-3 w-3 text-white" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Input bar */}
+            <div className="flex-shrink-0 bg-black border-t border-zinc-800/60 px-3 py-2 pb-safe">
+              <div className="flex items-end gap-2">
+                {/* Left actions */}
+                <div className="flex items-center gap-0.5 pb-1 flex-shrink-0">
+                  <button
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
+                  >
+                    <Smile className="h-[22px] w-[22px] text-zinc-400" />
+                  </button>
+                  <button
+                    onClick={handleFileSelect}
+                    className="w-9 h-9 flex items-center justify-center rounded-full active:bg-zinc-800 transition-colors"
+                  >
+                    <Paperclip className="h-[22px] w-[22px] text-zinc-400" />
+                  </button>
+                </div>
+
+                {/* Text input */}
+                <div className="flex-1 bg-zinc-800 rounded-3xl px-4 py-2.5 min-h-[42px] flex items-end">
+                  <textarea
+                    ref={inputRef}
+                    value={messageInput}
+                    onChange={(e) => {
+                      setMessageInput(e.target.value)
+                      e.target.style.height = 'auto'
+                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+                    }}
+                    onKeyDown={handleKeyPress}
+                    placeholder="Message..."
+                    className="w-full resize-none bg-transparent text-white placeholder-zinc-500 text-[15px] leading-relaxed focus:outline-none max-h-[120px]"
+                    rows={1}
+                  />
+                </div>
+
+                {/* Right action — mic or send */}
+                <div className="pb-1 flex-shrink-0">
+                  {messageInput.trim() || selectedMedia.length > 0 ? (
+                    <button
+                      onClick={sendMessage}
+                      disabled={sending}
+                      className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500 active:bg-blue-600 transition-colors disabled:opacity-50"
+                    >
+                      {sending
+                        ? <Loader2 className="h-4 w-4 text-white animate-spin" />
+                        : <Send className="h-4 w-4 text-white" />
+                      }
+                    </button>
+                  ) : (
+                    <button
+                      onMouseDown={startRecording}
+                      onMouseUp={stopRecording}
+                      onTouchStart={startRecording}
+                      onTouchEnd={stopRecording}
+                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${
+                        recording ? 'bg-red-500' : 'active:bg-zinc-800'
+                      }`}
+                    >
+                      <Mic className={`h-[22px] w-[22px] ${recording ? 'text-white' : 'text-zinc-400'}`} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Desktop empty state */
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+            <div className="w-20 h-20 rounded-full border-2 border-zinc-700 flex items-center justify-center mb-6">
+              <MessageCircle className="h-10 w-10 text-zinc-600" />
+            </div>
+            <h3 className="text-white text-xl font-bold mb-2">Your Messages</h3>
+            <p className="text-zinc-500 text-sm max-w-xs">Send private messages to a friend or group</p>
+            <div className="flex gap-3 mt-8">
+              <button
+                onClick={() => setShowNewChat(true)}
+                className="px-6 py-2.5 bg-white text-black font-semibold text-sm rounded-full active:bg-zinc-200 transition-colors"
+              >
+                New Message
+              </button>
+              <button
+                onClick={() => setShowNewGroup(true)}
+                className="px-6 py-2.5 bg-zinc-800 text-white font-semibold text-sm rounded-full active:bg-zinc-700 transition-colors"
+              >
+                New Group
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/*,audio/*"
+        multiple
+        onChange={handleFileChange}
+        className="hidden"
+      />
     </div>
   )
 }
