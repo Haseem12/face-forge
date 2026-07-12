@@ -1,54 +1,71 @@
+// app/api/forges/files/route.ts
 import { createClient } from '@/lib/supabase/server'
-import { NextRequest, NextResponse } from 'next/server'
+import { getForgeRole } from '@/lib/server/get-forge-role'
+import { canEditFiles } from '@/lib/forge-permissions'
+import { NextResponse } from 'next/server'
 
-export async function GET(request: NextRequest) {
+// GET /api/forges/files?forge_id=...
+// Any member (owner, contributor, or viewer) can read files.
+export async function GET(req: Request) {
   const supabase = await createClient()
-  const forgeId = request.nextUrl.searchParams.get('forge_id')
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { searchParams } = new URL(req.url)
+  const forgeId = searchParams.get('forge_id')
   if (!forgeId) {
     return NextResponse.json({ error: 'Missing forge_id' }, { status: 400 })
   }
 
-  try {
-    const { data, error } = await supabase
-      .from('forge_files')
-      .select('*')
-      .eq('forge_id', forgeId)
-      .order('created_at', { ascending: true })
-
-    if (error) throw error
-
-    return NextResponse.json({ files: data || [] })
-  } catch (error) {
-    console.error('[v0] Forge files GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch files' }, { status: 500 })
+  const role = await getForgeRole(supabase, forgeId, user.id)
+  if (!role) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
+
+  const { data, error } = await supabase
+    .from('forge_files')
+    .select('*')
+    .eq('forge_id', forgeId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ files: data || [] })
 }
 
-export async function POST(request: NextRequest) {
+// POST /api/forges/files
+// Add a new file. Owner or contributor only — viewers are read-only.
+export async function POST(req: Request) {
   const supabase = await createClient()
-  const { forge_id, file_name, file_type, content } = await request.json()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  if (!forge_id || !file_name || !file_type || !content) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const body = await req.json()
+    const { forge_id, file_name, file_type, content } = body
+
+    if (!forge_id || !file_name) {
+      return NextResponse.json({ error: 'Missing forge_id or file_name' }, { status: 400 })
     }
 
-    // Check if user is a contributor
-    const { data: contributor } = await supabase
-      .from('forge_contributors')
-      .select('role')
-      .eq('forge_id', forge_id)
-      .eq('user_id', user.id)
-      .single()
-
-    if (!contributor) {
-      return NextResponse.json({ error: 'Not a contributor' }, { status: 403 })
+    const role = await getForgeRole(supabase, forge_id, user.id)
+    if (!canEditFiles(role)) {
+      return NextResponse.json(
+        { error: role === 'viewer' ? 'Viewers cannot edit files' : 'Not authorized' },
+        { status: 403 }
+      )
     }
 
     const { data, error } = await supabase
@@ -56,33 +73,55 @@ export async function POST(request: NextRequest) {
       .insert({
         forge_id,
         file_name,
-        file_type,
-        content,
-        created_by: user.id,
+        file_type: file_type || 'text',
+        content: content || '',
       })
       .select()
+      .single()
 
     if (error) throw error
-
-    return NextResponse.json({ file: data[0] }, { status: 201 })
+    return NextResponse.json({ file: data })
   } catch (error) {
-    console.error('[v0] Forge files POST error:', error)
-    return NextResponse.json({ error: 'Failed to create file' }, { status: 500 })
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })
   }
 }
 
-export async function PUT(request: NextRequest) {
+// PUT /api/forges/files
+// Update a file's content. Owner or contributor only.
+export async function PUT(req: Request) {
   const supabase = await createClient()
-  const { file_id, content } = await request.json()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  if (!file_id || !content) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const body = await req.json()
+    const { file_id, content } = body
+
+    if (!file_id) {
+      return NextResponse.json({ error: 'Missing file_id' }, { status: 400 })
+    }
+
+    const { data: existingFile } = await supabase
+      .from('forge_files')
+      .select('forge_id')
+      .eq('id', file_id)
+      .maybeSingle()
+
+    if (!existingFile) {
+      return NextResponse.json({ error: 'File not found' }, { status: 404 })
+    }
+
+    const role = await getForgeRole(supabase, existingFile.forge_id, user.id)
+    if (!canEditFiles(role)) {
+      return NextResponse.json(
+        { error: role === 'viewer' ? 'Viewers cannot edit files' : 'Not authorized' },
+        { status: 403 }
+      )
     }
 
     const { data, error } = await supabase
@@ -90,43 +129,58 @@ export async function PUT(request: NextRequest) {
       .update({ content, updated_at: new Date().toISOString() })
       .eq('id', file_id)
       .select()
+      .single()
 
     if (error) throw error
-    if (!data?.[0]) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 })
-    }
-
-    return NextResponse.json({ file: data[0] })
+    return NextResponse.json({ file: data })
   } catch (error) {
-    console.error('[v0] Forge files PUT error:', error)
-    return NextResponse.json({ error: 'Failed to update file' }, { status: 500 })
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })
   }
 }
 
-export async function DELETE(request: NextRequest) {
+// DELETE /api/forges/files
+// Remove a file. Owner or contributor only.
+export async function DELETE(req: Request) {
   const supabase = await createClient()
-  const { file_id } = await request.json()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  if (!file_id) {
-    return NextResponse.json({ error: 'Missing file_id' }, { status: 400 })
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const body = await req.json()
+    const { file_id } = body
+
+    if (!file_id) {
+      return NextResponse.json({ error: 'Missing file_id' }, { status: 400 })
     }
 
-    const { error } = await supabase
+    const { data: existingFile } = await supabase
       .from('forge_files')
-      .delete()
+      .select('forge_id')
       .eq('id', file_id)
+      .maybeSingle()
 
+    if (!existingFile) {
+      return NextResponse.json({ error: 'File not found' }, { status: 404 })
+    }
+
+    const role = await getForgeRole(supabase, existingFile.forge_id, user.id)
+    if (!canEditFiles(role)) {
+      return NextResponse.json(
+        { error: role === 'viewer' ? 'Viewers cannot delete files' : 'Not authorized' },
+        { status: 403 }
+      )
+    }
+
+    const { error } = await supabase.from('forge_files').delete().eq('id', file_id)
     if (error) throw error
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('[v0] Forge files DELETE error:', error)
-    return NextResponse.json({ error: 'Failed to delete file' }, { status: 500 })
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })
   }
 }
