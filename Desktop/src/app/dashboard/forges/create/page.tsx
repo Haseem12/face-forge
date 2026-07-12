@@ -109,9 +109,13 @@ export default function CreateForgePage() {
       }
       const forge = await response.json()
 
-      // Step 2: Add owner as contributor if collaborative
+      // Step 2: Add owner as contributor if collaborative.
+      // Note: if this fails, ownership still resolves correctly elsewhere —
+      // getForgeRole() checks forges.user_id before it ever looks at the
+      // forge_contributors table — but we still want to know if it failed,
+      // since the Team tab would otherwise show an empty member list.
       if (isCollaborative && forge?.id) {
-        await fetch('/api/forges/contributors', {
+        const contributorRes = await fetch('/api/forges/contributors', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -121,6 +125,9 @@ export default function CreateForgePage() {
             is_initial: true,
           }),
         })
+        if (!contributorRes.ok) {
+          console.error('Failed to add owner as contributor:', await contributorRes.text().catch(() => ''))
+        }
       }
 
       // Step 3: Upload ZIP if provided
@@ -142,8 +149,10 @@ export default function CreateForgePage() {
         setUploadProgress(80)
 
         if (uploadResponse.ok) {
-          const uploadResult = await uploadResponse.json()
-          setPreviewUrl(uploadResult.previewUrl)
+          // Build the preview URL ourselves rather than trusting whatever
+          // the upload endpoint returns — this keeps every preview in the
+          // app going through the one sandboxed, access-controlled route.
+          setPreviewUrl(`/api/preview/${forge.id}`)
           setUploadProgress(100)
           showToast('Files uploaded successfully!', 'success')
         } else {
@@ -331,7 +340,20 @@ export default function CreateForgePage() {
                             </div>
                             <span className="text-[10px] text-gray-400 mx-auto">Preview</span>
                           </div>
-                          <iframe src={previewUrl} className="w-full bg-white" style={{ height: 500 }} title="Mobile Preview" />
+                          {/*
+                            Sandboxed to match the other preview iframes in
+                            the app. "allow-same-origin" is deliberately
+                            omitted — combined with "allow-scripts" it would
+                            let uploaded JS reach this app's cookies/session.
+                          */}
+                          <iframe
+                            src={previewUrl}
+                            className="w-full bg-white"
+                            style={{ height: 500 }}
+                            title="Mobile Preview"
+                            sandbox="allow-scripts allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox"
+                            referrerPolicy="no-referrer"
+                          />
                         </div>
                       )}
                     </div>
