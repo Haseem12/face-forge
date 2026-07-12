@@ -1,9 +1,9 @@
+// components/forges/ContributorsPanel.tsx
 'use client'
 
 import { useState } from 'react'
-import Image from 'next/image'
 import { Button } from '@/components/ui/button'
-import { Trash2, Plus, Crown } from 'lucide-react'
+import { UserPlus, X, Shield, Eye, Pencil, Loader2 } from 'lucide-react'
 
 interface Contributor {
   id: string
@@ -22,8 +22,15 @@ interface ContributorsPanelProps {
   contributors: Contributor[]
   isOwner: boolean
   forgeId: string
-  onAddContributor: (userId: string, role: string) => void
-  onRemoveContributor: (userId: string) => void
+  onAddContributor: (userId: string, role: string) => Promise<void> | void
+  onRemoveContributor: (userId: string) => Promise<void> | void
+  onChangeRole?: (userId: string, role: 'contributor' | 'viewer') => Promise<void> | void
+}
+
+const roleBadge: Record<Contributor['role'], { label: string; className: string; icon: React.ReactNode }> = {
+  owner: { label: 'Owner', className: 'bg-orange-100 text-orange-700', icon: <Shield className="w-3 h-3" /> },
+  contributor: { label: 'Can edit', className: 'bg-green-100 text-green-700', icon: <Pencil className="w-3 h-3" /> },
+  viewer: { label: 'View only', className: 'bg-gray-100 text-gray-600', icon: <Eye className="w-3 h-3" /> },
 }
 
 export default function ContributorsPanel({
@@ -32,131 +39,131 @@ export default function ContributorsPanel({
   forgeId,
   onAddContributor,
   onRemoveContributor,
+  onChangeRole,
 }: ContributorsPanelProps) {
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [searchEmail, setSearchEmail] = useState('')
-  const [selectedRole, setSelectedRole] = useState('contributor')
+  const [inviteUserId, setInviteUserId] = useState('')
+  const [inviteRole, setInviteRole] = useState<'contributor' | 'viewer'>('viewer')
+  const [inviting, setInviting] = useState(false)
+  const [busyUserId, setBusyUserId] = useState<string | null>(null)
 
-  const handleAddContributor = async () => {
-    if (!searchEmail.trim()) return
-    // Implement user search by email first
-    // For now, just close the form
-    setShowAddForm(false)
-    setSearchEmail('')
+  const handleInvite = async () => {
+    if (!inviteUserId.trim()) return
+    setInviting(true)
+    try {
+      await onAddContributor(inviteUserId.trim(), inviteRole)
+      setInviteUserId('')
+      setInviteRole('viewer')
+    } finally {
+      setInviting(false)
+    }
+  }
+
+  const handleToggleRole = async (contributor: Contributor) => {
+    if (!onChangeRole || contributor.role === 'owner') return
+    const nextRole = contributor.role === 'contributor' ? 'viewer' : 'contributor'
+    setBusyUserId(contributor.user_id)
+    try {
+      await onChangeRole(contributor.user_id, nextRole)
+    } finally {
+      setBusyUserId(null)
+    }
+  }
+
+  const handleRemove = async (userId: string) => {
+    setBusyUserId(userId)
+    try {
+      await onRemoveContributor(userId)
+    } finally {
+      setBusyUserId(null)
+    }
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">Collaborators</h2>
-          <p className="text-sm text-gray-500 mt-1">{contributors.length} members</p>
-        </div>
-        {isOwner && (
-          <Button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="gap-2 bg-gradient-to-r from-orange-500 to-purple-600 hover:from-orange-600 hover:to-purple-700"
-          >
-            <Plus className="w-4 h-4" />
-            Add Member
-          </Button>
-        )}
-      </div>
-
-      {/* Add Form */}
-      {showAddForm && isOwner && (
-        <div className="bg-gray-50 p-4 rounded-lg mb-6 space-y-3">
-          <input
-            type="email"
-            placeholder="Enter email address..."
-            value={searchEmail}
-            onChange={(e) => setSearchEmail(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
-          />
-          <select
-            value={selectedRole}
-            onChange={(e) => setSelectedRole(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
-          >
-            <option value="contributor">Contributor (edit files)</option>
-            <option value="viewer">Viewer (read-only)</option>
-          </select>
-          <div className="flex gap-2">
-            <Button
-              onClick={handleAddContributor}
-              size="sm"
-              className="flex-1 bg-green-600 hover:bg-green-700"
+    <div className="space-y-4">
+      {isOwner && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+          <h3 className="font-bold text-gray-900 text-sm mb-3 flex items-center gap-2">
+            <UserPlus className="w-4 h-4 text-purple-600" />
+            Invite Someone
+          </h3>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={inviteUserId}
+              onChange={(e) => setInviteUserId(e.target.value)}
+              placeholder="User ID"
+              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as 'contributor' | 'viewer')}
+              className="px-3 py-2 text-sm border border-gray-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
             >
-              Invite
-            </Button>
-            <Button
-              onClick={() => setShowAddForm(false)}
-              size="sm"
-              variant="outline"
-              className="flex-1"
-            >
-              Cancel
+              <option value="viewer">View only</option>
+              <option value="contributor">Can edit</option>
+            </select>
+            <Button onClick={handleInvite} disabled={inviting || !inviteUserId.trim()} size="sm" className="bg-purple-600 hover:bg-purple-700 text-white">
+              {inviting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Invite'}
             </Button>
           </div>
+          <p className="text-xs text-gray-400 mt-2">
+            "View only" lets someone see files and comment without being able to edit. You can change this anytime.
+          </p>
         </div>
       )}
 
-      {/* Contributors List */}
-      <div className="space-y-3">
-        {contributors.map(contributor => (
-          <div
-            key={contributor.id}
-            className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
-          >
-            <div className="flex items-center gap-3 flex-1">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-purple-600 flex items-center justify-center text-white font-bold overflow-hidden flex-shrink-0">
-                {contributor.profiles?.avatar_url ? (
-                  <Image
-                    src={contributor.profiles.avatar_url}
-                    alt={contributor.profiles.display_name}
-                    width={40}
-                    height={40}
-                    className="w-full h-full object-cover"
-                  />
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">
+        {contributors.length === 0 && (
+          <p className="text-sm text-gray-400 text-center py-8">No team members yet</p>
+        )}
+        {contributors.map((c) => {
+          const badge = roleBadge[c.role]
+          const isBusy = busyUserId === c.user_id
+          return (
+            <div key={c.id} className="flex items-center gap-3 p-4">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-100 to-purple-100 flex items-center justify-center overflow-hidden flex-shrink-0">
+                {c.profiles?.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={c.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  contributor.profiles?.display_name.charAt(0).toUpperCase()
+                  <span className="text-sm font-bold text-purple-600">
+                    {(c.profiles?.display_name || c.profiles?.username || '?').charAt(0).toUpperCase()}
+                  </span>
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm text-gray-900 flex items-center gap-2">
-                  {contributor.profiles?.display_name}
-                  {contributor.role === 'owner' && (
-                    <Crown className="w-3 h-3 text-yellow-500" />
-                  )}
-                </div>
-                <p className="text-xs text-gray-500">@{contributor.profiles?.username}</p>
+                <p className="text-sm font-semibold text-gray-900 truncate">
+                  {c.profiles?.display_name || c.profiles?.username || c.user_id}
+                </p>
+                <span className={`inline-flex items-center gap-1 mt-0.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${badge.className}`}>
+                  {badge.icon}
+                  {badge.label}
+                </span>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                contributor.role === 'owner'
-                  ? 'bg-yellow-100 text-yellow-700'
-                  : contributor.role === 'contributor'
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'bg-gray-200 text-gray-700'
-              }`}>
-                {contributor.role === 'owner' ? 'Owner' : contributor.role === 'contributor' ? 'Contributor' : 'Viewer'}
-              </span>
-
-              {isOwner && contributor.role !== 'owner' && (
-                <Button
-                  onClick={() => onRemoveContributor(contributor.user_id)}
-                  variant="outline"
-                  size="sm"
-                  className="text-red-600 border-red-300 hover:bg-red-50 h-8 w-8 p-0"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </Button>
+              {isOwner && c.role !== 'owner' && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleToggleRole(c)}
+                    disabled={isBusy}
+                    className="text-xs font-medium text-purple-600 hover:text-purple-800 px-2 py-1 rounded-lg hover:bg-purple-50 transition-colors disabled:opacity-50"
+                    title={c.role === 'contributor' ? 'Restrict to view only' : 'Allow editing'}
+                  >
+                    {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : c.role === 'contributor' ? 'Restrict' : 'Allow edit'}
+                  </button>
+                  <button
+                    onClick={() => handleRemove(c.user_id)}
+                    disabled={isBusy}
+                    className="p-1.5 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                    title="Remove from forge"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               )}
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
