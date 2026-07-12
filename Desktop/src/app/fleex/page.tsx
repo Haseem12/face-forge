@@ -457,17 +457,27 @@ export default function FleexPage() {
       {/* Top Bar */}
       <div className="fixed top-0 left-0 right-0 z-30 bg-gradient-to-b from-black/60 to-transparent pt-12 pb-4">
         <div className="flex items-center justify-between px-4">
-          {/* Category Selector */}
-          <button
-            onClick={() => {
-              setTempCategory(selectedCategory)
-              setShowCategoryModal(true)
-            }}
-            className="px-4 py-1.5 bg-white/10 backdrop-blur-md rounded-full text-white text-xs font-medium active:scale-95 transition flex items-center gap-1"
-          >
-            <Sparkles className="h-3 w-3" />
-            {selectedCategory}
-          </button>
+          {/* Left: Back Button + Category Selector */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => router.back()}
+              aria-label="Go back"
+              className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white active:scale-95 transition flex-shrink-0"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+
+            <button
+              onClick={() => {
+                setTempCategory(selectedCategory)
+                setShowCategoryModal(true)
+              }}
+              className="px-4 py-1.5 bg-white/10 backdrop-blur-md rounded-full text-white text-xs font-medium active:scale-95 transition flex items-center gap-1"
+            >
+              <Sparkles className="h-3 w-3" />
+              {selectedCategory}
+            </button>
+          </div>
           
           {/* Refresh Button */}
           <button
