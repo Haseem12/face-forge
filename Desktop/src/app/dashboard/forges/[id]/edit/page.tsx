@@ -12,6 +12,7 @@ import FileSegmentEditor from '@/components/forges/FileSegmentEditor'
 import ContributorsPanel from '@/components/forges/ContributorsPanel'
 import ForgeComments from '@/components/forges/ForgeComments'
 import PublishForgeModal from '@/components/forges/PublishForgeModal'
+import { canEditFiles, type ForgeRole } from '@/lib/forge-permissions'
 import {
   Code2, Users, Eye, MessageCircle, Share2, ChevronLeft,
   Upload, FileArchive, X, Loader2, Play, Smartphone, Monitor,
@@ -73,17 +74,27 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
   const [notFound, setNotFound] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [isOwner, setIsOwner] = useState(false)
+  const [currentUserRole, setCurrentUserRole] = useState<ForgeRole | null>(null)
   const [showPublishModal, setShowPublishModal] = useState(false)
   const [activeTab, setActiveTab] = useState('preview')
 
   // ZIP Upload state
   const [zipFile, setZipFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  // previewUrl: what the embedded editor iframe loads. Points straight at
+  // the raw-HTML API route so we don't nest iframe-inside-iframe (the public
+  // /preview/[forgeId] page is itself just an iframe wrapper around this
+  // same endpoint).
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewKey, setPreviewKey] = useState(0)
   const [showMobilePreview, setShowMobilePreview] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  // shareUrl: the link you'd actually hand to someone else. Goes through
+  // the wrapped /preview/[forgeId] page, which has the proper 404/private
+  // fallback states — the API route has none of that, it's plumbing only.
+  const shareUrl = forge ? `/preview/${forge.id}` : null
 
   // Get current user
   useEffect(() => {
@@ -114,7 +125,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
         // Set preview URL from config
         if (forgeData.config?.files?.length > 0) {
-          setPreviewUrl(`/preview/${forgeData.id}`)
+          setPreviewUrl(`/api/preview/${forgeData.id}`)
         }
 
         if (forgeData.is_collaborative) {
@@ -149,19 +160,25 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
     loadForge()
   }, [params])
 
-  // Check ownership when forge and user are loaded
+  // Check ownership + resolve the current user's actual role when forge and
+  // user are loaded. isOwner stays as a convenience boolean; currentUserRole
+  // is the source of truth for what they're allowed to do.
   useEffect(() => {
     if (forge && currentUserId) {
       if (forge.is_collaborative) {
-        const owner = contributors.find(
-          (c: Contributor) => c.user_id === currentUserId && c.role === 'owner'
-        )
-        setIsOwner(!!owner)
+        const membership = contributors.find((c: Contributor) => c.user_id === currentUserId)
+        const role = membership?.role ?? null
+        setCurrentUserRole(role)
+        setIsOwner(role === 'owner')
       } else {
-        setIsOwner(forge.created_by === currentUserId || forge.user_id === currentUserId)
+        const owns = forge.created_by === currentUserId || forge.user_id === currentUserId
+        setCurrentUserRole(owns ? 'owner' : null)
+        setIsOwner(owns)
       }
     }
   }, [forge, currentUserId, contributors])
+
+  const canEdit = canEditFiles(currentUserRole)
 
   // ZIP Upload handlers
   const handleZipSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -189,7 +206,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
       })
 
       if (uploadResponse.ok) {
-        setPreviewUrl(`/preview/${forge.id}?v=${Date.now()}`)
+        setPreviewUrl(`/api/preview/${forge.id}?v=${Date.now()}`)
         setPreviewKey(prev => prev + 1)
         setZipFile(null)
       } else {
@@ -204,7 +221,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
   const refreshPreview = () => {
     setPreviewKey(prev => prev + 1)
-    setPreviewUrl(`/preview/${forge?.id}?v=${Date.now()}`)
+    setPreviewUrl(`/api/preview/${forge?.id}?v=${Date.now()}`)
   }
 
   // File handlers
@@ -272,6 +289,25 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
       }
     } catch (error) {
       console.error('Error adding contributor:', error)
+    }
+  }
+
+  const handleChangeContributorRole = async (userId: string, role: 'contributor' | 'viewer') => {
+    if (!forge?.id) return
+    try {
+      const res = await fetch('/api/forges/contributors', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forge_id: forge.id, user_id: userId, role }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setContributors(prev =>
+          prev.map(c => (c.user_id === userId ? { ...c, role: data.contributor?.role ?? role } : c))
+        )
+      }
+    } catch (error) {
+      console.error('Error changing contributor role:', error)
     }
   }
 
@@ -444,7 +480,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
 
           {/* PREVIEW TAB */}
           <TabsContent value="preview" className="space-y-4">
-            {isOwner && (
+            {canEdit && (
               <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-3">
                   <FileArchive className="w-5 h-5 text-purple-600" />
@@ -499,8 +535,8 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
                   <button onClick={refreshPreview} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
                     <RefreshCw className="w-4 h-4" />
                   </button>
-                  {previewUrl && (
-                    <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
+                  {shareUrl && (
+                    <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
                       <ExternalLink className="w-4 h-4" />
                     </a>
                   )}
@@ -523,13 +559,22 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
                         <span className="text-[10px] text-gray-400 mx-auto">{forge.name}</span>
                       </div>
                     )}
+                    {/*
+                      Sandbox intentionally omits "allow-same-origin". Paired
+                      with "allow-scripts", that combination would let
+                      uploaded/user JS read this app's cookies and reach into
+                      the parent page — the same issue fixed on the public
+                      /preview/[forgeId] page. Scripts still run; they're just
+                      isolated from your session.
+                    */}
                     <iframe
                       ref={iframeRef}
                       src={previewUrl}
                       key={previewKey}
                       className="w-full h-full bg-white"
                       title="Forge Preview"
-                      sandbox="allow-scripts allow-same-origin"
+                      sandbox="allow-scripts allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox"
+                      referrerPolicy="no-referrer"
                     />
                   </div>
                 </div>
@@ -572,6 +617,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
                 onAddFile={handleAddFile}
                 onDeleteFile={handleDeleteFile}
                 onUpdateFile={handleUpdateFile}
+                canEdit={canEdit}
               />
             ) : (
               <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
@@ -591,6 +637,7 @@ export default function EditForgePage({ params: paramsPromise }: { params: Promi
                 forgeId={forge.id}
                 onAddContributor={handleAddContributor}
                 onRemoveContributor={handleRemoveContributor}
+                onChangeRole={handleChangeContributorRole}
               />
             ) : (
               <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
